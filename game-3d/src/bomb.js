@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createWireCuttingModule } from './wireCuttingModule.js';
 import { createKeypadModule } from './keypadModule.js';
 import { createButtonChoiceModule } from './buttonChoiceModule.js';
+import { createRearPanelModule } from './rearPanelModule.js';
 import { randomInt, shuffle } from './random.js';
 
 // Cor do corpo por variante — puramente visual, os 3 desafios são sempre
@@ -34,6 +35,16 @@ const QUADRANTS = [
 ];
 
 let nextBombId = 1;
+
+// Fusível individual da bomba — inicia quando ela sai do dispenser
+// (dispenser.js#dropBomb chama startTimer) e corre em QUALQUER estação, não
+// só na mesa de desarme (por isso tickTimer é separado de update(), que só
+// roda enquanto a bomba está ativa no modo de desarme). Valor placeholder,
+// ajustável conforme playtesting — serve de base para o alarme de
+// proximidade (proximityAlarm.js), não implica detonação/derrota automática
+// ao chegar a zero (o CLAUDE.md já trata "não desarmada" como incorreta na
+// entrega, isso não muda).
+export const BOMB_FUSE_SECONDS = 90;
 
 // Corpo com cantos arredondados de verdade via ExtrudeGeometry (Shape em
 // forma de retângulo com cantos em arco + bevelEnabled), em vez de uma
@@ -162,6 +173,13 @@ export function createBomb() {
   // próprio update/handleTrigger/dispose/resultado.
   const modules = [wireModule, buttonModule, keypadModule];
 
+  // Etapa traseira (parafusos + núcleo) fica FORA de `modules`: não usa
+  // handleTrigger (interação contínua de girar o pulso, não um toque único)
+  // e não conta para isFullyCorrect() — por isso é atualizada separadamente
+  // em update(), com sua própria assinatura (screwdriverTip/Quaternion).
+  const rearPanelModule = createRearPanelModule();
+  group.add(rearPanelModule.group);
+
   // `quadrantPieces`: as 4 peças VISUAIS a posicionar, uma por quadrante —
   // o teclado de senha vira duas peças (padGroup e displayGroup) que podem
   // cair em quadrantes diferentes, sorteados independentemente do resto.
@@ -198,6 +216,30 @@ export function createBomb() {
   let pamphletGroup = null;
   let delivered = false;
   let active = false;
+  let fuseDuration = null;
+  let fuseRemaining = null;
+  let coreExposed = false;
+
+  // Chamado por defuseTable.js na primeira vez que rearPanelModule.coverOpen
+  // vira true — guarda a flag no PRÓPRIO objeto da bomba (mesmo padrão de
+  // markScanned/hasPamphlet), pra sobreviver a sair/entrar do modo de
+  // desarme com a mesma bomba sem registrar o núcleo duas vezes no grab
+  // system.
+  function markCoreExposed() {
+    coreExposed = true;
+  }
+
+  function startTimer(duration) {
+    fuseDuration = duration;
+    fuseRemaining = duration;
+  }
+
+  // Tick do fusível — chamado todo frame para toda bomba viva (game.js),
+  // independente de estar ou não no modo de desarme.
+  function tickTimer(dt) {
+    if (fuseRemaining === null) return;
+    fuseRemaining = Math.max(0, fuseRemaining - dt);
+  }
 
   // Os módulos ficam SEMPRE visíveis no modelo da bomba, desde a criação —
   // só a interação (cortar fio, apertar botão, digitar senha) é travada até
@@ -213,11 +255,12 @@ export function createBomb() {
     led.material.emissiveIntensity = 0;
   }
 
-  function update(dt, tipPositions, cutterTip) {
+  function update(dt, tipPositions, cutterTip, screwdriverTip, screwdriverQuaternion) {
     if (!active) return;
     ledPhase += dt * 6;
     led.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(ledPhase);
     modules.forEach((mod) => mod.update(dt, tipPositions, cutterTip));
+    rearPanelModule.update(dt, screwdriverTip, screwdriverQuaternion);
   }
 
   function handleTrigger(point) {
@@ -236,6 +279,7 @@ export function createBomb() {
 
   function dispose() {
     modules.forEach((mod) => mod.dispose());
+    rearPanelModule.dispose();
     body.geometry.dispose();
     body.material.dispose();
     beltStripe.geometry.dispose();
@@ -255,13 +299,31 @@ export function createBomb() {
     wireModule,
     buttonModule,
     keypadModule,
+    rearPanelModule,
     update,
     handleTrigger,
     activateModules,
     deactivateModules,
     markScanned,
+    markCoreExposed,
     isFullyCorrect,
     dispose,
+    startTimer,
+    tickTimer,
+    get coreExposed() {
+      return coreExposed;
+    },
+    get fuseRemaining() {
+      return fuseRemaining;
+    },
+    // Fração de urgência (0 = acabou de sair do dispenser, 1 = fusível
+    // zerado) — usada pelo alarme de proximidade para escalar tom/haptics.
+    // null enquanto o timer não foi iniciado (bomba ainda não existe de
+    // verdade fora do dispenser).
+    get fuseUrgency() {
+      if (fuseDuration === null || fuseDuration === 0) return null;
+      return 1 - fuseRemaining / fuseDuration;
+    },
     get scanned() {
       return scanned;
     },

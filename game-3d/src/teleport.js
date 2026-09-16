@@ -105,5 +105,12 @@ export function createTeleportSystem({ scene, player, controllers, points }) {
     setPadsVisible(true);
   }
 
-  return { update, lock, unlock };
+  return {
+    update,
+    lock,
+    unlock,
+    get isLocked() {
+      return locked;
+    },
+  };
 }

@@ -61,43 +61,78 @@ Quest 3 de verdade — evita o ciclo lento de build → headset → testar.
 ### Objetos macro (a sala)
 
 - **Sala** onde o jogador se movimenta livremente (teleporte).
-- **Dispenser de teto** — "cospe" bombas em intervalos, que caem numa caixa
-  de coleta.
+- **Dispenser de teto** — arma uma bomba em intervalos (ou a cada entrega),
+  mas só a solta de fato quando o jogador puxa a **alavanca física** ao
+  nível do chão, perto da caixa de coleta (o corpo do dispenser fica no
+  teto, fora de alcance). Se o jogador demorar demais pra puxar, um
+  fallback automático solta a bomba sozinho — ver "Sistema de chegada de
+  bombas" abaixo.
 - **Caixa de coleta** — onde as bombas do dispenser se acumulam até o
   jogador pegá-las.
-- **Scanner** — passa uma luz verde "lendo" a bomba e, ao final, ejeta um
-  panfleto com as instruções de desarme daquela bomba específica.
+- **Scanner** — a própria inserção da bomba no slot já dispara o scan
+  (sem botão), com uma barra de progresso real durante a leitura; ao
+  final, ejeta um panfleto com as instruções e atualiza um **holograma de
+  apoio** preso ao teto central da sala (visível de qualquer estação,
+  mostra os dados da última bomba escaneada — complementa o panfleto, não
+  o substitui). A cada 3 bombas escaneadas, o scanner **superaquece** e
+  recusa novas bombas até o jogador ir até o centro da sala e puxar uma
+  **alavanca de purga** (3 puxões).
 - **Mesa de desarme** — onde o jogador entra no modo de desarme (core do
-  jogo).
-- **Esteira de entrega** — onde o jogador solta a bomba já desarmada e
-  aciona o envio.
+  jogo). Tem um botão dedicado para **girar a bomba 180°**, expondo uma
+  etapa traseira (ver "Modo de desarme" abaixo).
+- **Esteira de entrega** — não é mais um botão: o jogador precisa
+  **arremessar** a bomba desarmada contra um carrinho-alvo que desliza em
+  vaivém sobre a esteira. A mesma estação abriga um **duto de descarte**
+  para o núcleo/bateria retirado da etapa traseira (aceita arremesso ou só
+  aproximar).
 
 ### Objetos micro
 
 - **Bombas** — 3 variações diferentes por enquanto, e a diferença entre
   elas é **puramente visual**: posição dos elementos na bomba e cor base do
   corpo da bomba. Os 3 desafios (fio, botão, senha) são os mesmos em todas
-  as variações — só muda o layout/aparência.
+  as variações — só muda o layout/aparência. Toda bomba também tem uma
+  **etapa traseira** (4 parafusos + núcleo/bateria, ver "Modo de desarme")
+  e um **fusível individual** que corre desde que ela sai do dispenser —
+  não afeta a pontuação (que continua decidida só na entrega), serve de
+  base para o alarme de proximidade (ver "Sistema de áudio e feedback").
 - **Alicate** — ferramenta para cortar fios no modo de desarme.
+- **Chave de fenda** — ferramenta para remover os 4 parafusos da etapa
+  traseira, girando o pulso perto de cada parafuso (não usa o gatilho,
+  diferente do alicate).
+- **Núcleo/bateria volátil** — exposto depois que os 4 parafusos da etapa
+  traseira são removidos; o jogador pega e leva até o duto de descarte da
+  esteira. Tarefa física extra, sem efeito na pontuação.
 - **Panfleto** — contém as instruções de desarme daquela bomba específica;
   fica anexado à bomba depois de retirada do scanner.
+- **Cinto utilitário** — preso ao corpo do jogador (segue posição e giro da
+  cabeça, mas não a inclinação), carrega o alicate (lado direito) e a
+  chave de fenda (lado esquerdo) — as ferramentas não ficam mais fixas em
+  pontos da mesa.
 
 ## Fluxo completo de uma bomba
 
-1. A bomba cai do dispenser na caixa de coleta.
+1. O jogador puxa a alavanca do dispenser (ou o fallback automático dispara)
+   e a bomba cai na caixa de coleta — o fusível individual dela começa a
+   correr nesse momento.
 2. O jogador pega a bomba e leva até o scanner.
-3. O jogador coloca a bomba no scanner e aperta um botão para iniciar o
-   scan (luz verde "lendo" a bomba).
+3. O jogador insere a bomba no slot do scanner — a inserção sozinha já
+   dispara o scan (barra de progresso real, sem precisar de botão).
 4. Ao terminar, o scanner ejeta um panfleto com as instruções daquela
-   bomba, que fica **anexado à bomba** — o jogador leva os dois juntos.
+   bomba, que fica **anexado à bomba** — o jogador leva os dois juntos — e
+   atualiza o holograma de apoio no teto central.
 5. O jogador leva a bomba (com o panfleto anexado) até a mesa de desarme.
 6. O jogador coloca a bomba na mesa e aciona um input para entrar no
    **modo de desarme**.
-7. O jogador resolve o desarme (ver seção abaixo).
+7. O jogador resolve o desarme frontal (fio/botão/senha) e, se quiser,
+   gira a bomba 180° para resolver a etapa traseira (parafusos + núcleo) —
+   ver seção "Modo de desarme".
 8. O jogador sai do modo de desarme, pega a bomba e leva até a esteira.
-9. O jogador coloca a bomba na esteira e aperta um botão para enviá-la —
-   **o resultado (certo/errado) não é revelado nesse momento**, só ao fim
-   do turno (ver "Pontuação").
+9. O jogador **arremessa** a bomba desarmada contra o carrinho-alvo da
+   esteira para entregá-la — **o resultado (certo/errado) não é revelado
+   nesse momento**, só ao fim do turno (ver "Pontuação"). Se também
+   removeu o núcleo/bateria na etapa traseira, descarta no duto da mesma
+   estação (arremessando ou só aproximando).
 
 **Atalho permitido**: o jogador pode levar a bomba direto da caixa para a
 mesa de desarme, pulando o scanner — nesse caso ele não tem o panfleto com
@@ -106,14 +141,20 @@ as instruções, o que aumenta a chance de errar o desarme.
 ## Sistema de chegada de bombas (dispenser)
 
 Diferente do modelo antigo de "estações" e "fases com quantidade fixa de
-bombas": **não existem mais fases**. O dispenser libera bombas de forma
+bombas": **não existem mais fases**. O dispenser arma bombas de forma
 contínua, seguindo esta regra:
 
-- Solta uma nova bomba quando o jogador **entrega** uma bomba na esteira
+- Arma uma nova bomba quando o jogador **entrega** uma bomba na esteira
   (repondo o que foi consumido do "estoque" de trabalho).
-- Solta uma nova bomba em um **intervalo fixo determinado**, mesmo sem
-  entrega, caso o jogador esteja demorando demais — isso evita que o
-  jogador consiga "pausar" a pressão do jogo ficando parado.
+- Arma uma nova bomba em um **intervalo fixo determinado**, mesmo sem
+  entrega, caso o jogador esteja demorando demais.
+
+"Armar" só acende um indicador luminoso no dispenser — soltar a bomba de
+fato exige o jogador ir até lá e **puxar a alavanca física** (ver "Objetos
+macro"). Se ele demorar demais pra puxar depois de armada, um **fallback
+automático** solta a bomba sozinho mesmo assim — isso preserva a regra
+original de que o jogador não consegue "pausar" a pressão do jogo ficando
+parado, mesmo com a alavanca exigindo uma ação física a mais.
 
 Isso substitui inteiramente o antigo `BombManager` baseado em estações
 livres/spawn rate crescente — a pressão agora vem do fluxo de produção
@@ -128,18 +169,23 @@ desse modo:
 - O jogador fica **sentado/parado — locomoção travada** enquanto estiver
   nesse modo (diferente do resto do jogo, onde ele anda livremente pela
   sala).
-- A bomba fica **centralizada na mesa e estática** (não se move).
+- A bomba fica **centralizada na mesa** e só se move quando o jogador
+  aciona o botão de **rotação** (gira 180° em torno do eixo horizontal,
+  "virando de cabeça pra baixo" pra expor a etapa traseira — não é uma
+  interação livre, é um botão dedicado).
 - À **esquerda** fica o panfleto com as instruções (o jogador pode pegá-lo
   e lê-lo).
-- À **direita** fica o alicate de corte (o jogador pode pegá-lo; apertar o
-  gatilho aciona o corte de fio).
+- O alicate (corte de fio) e a chave de fenda (etapa traseira) não ficam
+  mais fixos na mesa — vivem no **cinto utilitário** que o jogador usa o
+  tempo todo (direita = alicate, esquerda = chave de fenda), pegáveis por
+  proximidade como qualquer outro objeto.
 
 ### Interações com a bomba
 
-Toda bomba apresenta os 3 tipos de desafio **simultaneamente** — não é um
-subconjunto sorteado, todas as bombas têm os três. Quantidade e cores são
-sempre as mesmas entre bombas; o que muda a cada bomba gerada é **qual**
-opção é a correta:
+Toda bomba apresenta os 3 tipos de desafio frontais **simultaneamente** —
+não é um subconjunto sorteado, todas as bombas têm os três. Quantidade e
+cores são sempre as mesmas entre bombas; o que muda a cada bomba gerada é
+**qual** opção é a correta:
 
 1. **Corte de fio** — sempre **4 fios**, sempre as **mesmas 4 cores**; qual
    dos 4 é o fio certo a cortar é sorteado aleatoriamente para cada bomba.
@@ -152,6 +198,17 @@ opção é a correta:
    aleatoriamente para cada bomba. A bomba mostra um teclado numérico e um
    visor que exibe os dígitos já inseridos; o jogador digita clicando nos
    botões do teclado.
+
+### Etapa traseira (opcional, sem efeito na pontuação)
+
+Depois de girar a bomba 180° na mesa, o jogador vê 4 parafusos na face que
+antes ficava embaixo. Com a chave de fenda do cinto, ele encosta em cada
+parafuso e gira o pulso algumas vezes para soltá-lo (não usa o gatilho).
+Depois dos 4 removidos, uma tampa abre e expõe um núcleo/bateria volátil,
+que o jogador pega e leva até o duto de descarte da esteira. É tarefa
+física extra — o documento de especificação que introduziu essa mecânica
+não liga isso a pontuação, então continua valendo só o resultado dos 3
+desafios frontais (ver "Pontuação").
 
 ## Conteúdo do panfleto
 
@@ -391,6 +448,38 @@ Além disso, dentro do **modo de desarme** (mesa) a locomoção fica
 **completamente travada** — o jogador permanece sentado/parado até sair
 desse modo. É um estado à parte do teleporte livre usado no resto da sala.
 
+### Puxão (force pull) e arremesso
+
+Duas mecânicas extras que preservam o teleporte fixo (não o substituem):
+
+- **Puxão**: o jogador mira um objeto pegável fora do alcance normal de
+  grab, segura o gatilho e puxa o pulso pra trás — o objeto voa até a mão.
+  Serve pra resgatar bombas/ferramentas jogadas ou fora de alcance sem
+  precisar teleportar até lá. Desativado dentro do modo de desarme (mesmo
+  travamento do teleporte).
+- **Arremesso**: soltar o grip com velocidade suficiente faz bombas (e o
+  núcleo/bateria da etapa traseira) herdarem essa velocidade e caírem com
+  gravidade simples, em vez de só cair no lugar — é como a esteira agora
+  recebe entregas (ver "Objetos macro").
+
+Nenhuma das duas usa motor de física real (a regra da seção "Stack
+tecnológica" continua valendo) — é velocidade/gesto medido diretamente
+pela posição do controller, sem colisão de verdade.
+
+## Sistema de áudio e feedback
+
+- **Música de tensão**: nos últimos ~15s da partida (ver "Ideia central").
+- **Alarme de proximidade**: toda bomba com fusível ativo acima de um
+  limiar de urgência ganha um bipe **3D posicional** (não mono) que
+  acelera e fica mais agudo conforme o tempo acaba — o jogador consegue
+  localizar a direção da bomba crítica pelo próprio áudio espacializado,
+  mesmo estando em outra estação. Também pulsa o controller que estiver
+  segurando essa bomba, se houver.
+- **Haptics**: pulsos curtos de vibração em pegar objeto, confirmar um
+  puxão, e no alarme de proximidade acima. Ainda não cobre todos os
+  pontos de feedback tátil originalmente cotados (corte de fio, toque em
+  botões físicos) — ver `game-3d/instrucao.md` para o estado exato.
+
 ## Roteiro de fases do MVP
 
 1. Cena básica + sessão WebXR rodando no Quest (chão, luz, `VRButton`,
@@ -419,3 +508,15 @@ O MVP jogável mínimo existe a partir da fase 7 (ciclo completo de uma
 bomba, do dispenser à entrega). As fases 8-10 são o que dá identidade ao
 jogo (tensão, pontuação, polish) — se o prazo apertar, a fase 10 pode ser
 cortada sem perder a essência da ideia.
+
+### Fase 11 — Loop Overcooked (implementada)
+
+Depois do MVP completo, o fluxo linear acima foi expandido pra um loop
+mais caótico: alavancas físicas (dispenser, purga do scanner), scanner por
+inserção com crise de superaquecimento e holograma de apoio, rotação +
+etapa traseira na bancada, esteira por arremesso, e alarme de proximidade
+3D — todas as seções deste documento já refletem esse estado atual. O
+histórico de decisões e suposições tomadas durante essa implementação
+(o que ficou parcial, valores placeholder como o tempo do fusível, etc.)
+fica documentado em `game-3d/instrucao.md`, que não repete o que já está
+aqui — só referencia.

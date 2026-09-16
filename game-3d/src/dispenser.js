@@ -1,15 +1,21 @@
 import * as THREE from 'three';
-import { createBomb } from './bomb.js';
+import { createBomb, BOMB_FUSE_SECONDS } from './bomb.js';
 import { createStripeTexture } from './stripeTexture.js';
+import { createLeverSwitch } from './leverSwitch.js';
 
 const CEILING_HEIGHT = 2.6;
 const CHUTE_EXIT_HEIGHT = CEILING_HEIGHT - 0.56;
 const FALL_DURATION = 0.6;
+const BLINK_SPEED = 6;
 
-// Dispenser de teto: solta bombas (bomb.js) que caem até a caixa de coleta.
-// Quem decide QUANDO soltar é bombFlow.js — este módulo só sabe animar a
-// queda e avisar quando a bomba pousa (onBombLanded).
-export function createDispenser({ scene, position, rotationY = 0, landingPosition, onBombLanded }) {
+// Dispenser de teto: o corpo fica fora de alcance (montado no teto), então
+// a interação física mora numa alavanca separada, ao nível do chão, perto
+// da caixa de coleta (Estação 1 do documento de especificação) — o jogador
+// puxa a alavanca (leverSwitch.js) para soltar a bomba armada. QUANDO uma
+// bomba fica pronta pra ser solta continua sendo decisão do bombFlow.js
+// (`onReady`/`setArmed`); este módulo só anima a queda, avisa quando pousa
+// (onBombLanded) e expõe a alavanca + o indicador luminoso de "pronto".
+export function createDispenser({ scene, position, rotationY = 0, landingPosition, onBombLanded, onLeverPulled }) {
   const group = new THREE.Group();
   group.position.set(position.x, CEILING_HEIGHT, position.z);
   group.rotation.y = rotationY;
@@ -48,10 +54,50 @@ export function createDispenser({ scene, position, rotationY = 0, landingPositio
   chute.position.y = -0.44;
   group.add(chute);
 
+  // Alavanca + indicador ficam no chão, perto da caixa de coleta — não no
+  // corpo do dispenser (que está no teto, fora de alcance). Offset local
+  // (0.4 pra "direita", 0.35 "pra frente" do jogador) rotacionado pelo mesmo
+  // rotationY da estação, pra funcionar em qualquer um dos 4 ângulos fixos
+  // do roomLayout.
+  const floorOffset = new THREE.Vector3(0.4, 0, 0.35).applyAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    rotationY
+  );
+  const leverPosition = new THREE.Vector3(
+    position.x + floorOffset.x,
+    0,
+    position.z + floorOffset.z
+  );
+  const lever = createLeverSwitch({
+    scene,
+    position: leverPosition,
+    rotationY,
+    requiredPulls: 1,
+    onComplete: () => onLeverPulled?.(),
+  });
+
+  const armedIndicator = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 0 })
+  );
+  armedIndicator.position.set(leverPosition.x, 0.55, leverPosition.z);
+  scene.add(armedIndicator);
+
+  let armed = false;
+  let blinkPhase = 0;
+
+  function setArmed(value) {
+    armed = value;
+    if (!armed) armedIndicator.material.emissiveIntensity = 0;
+  }
+
   const falling = [];
 
   function dropBomb() {
     const bomb = createBomb();
+    // Fusível começa a correr assim que a bomba sai do dispenser (documento
+    // de especificação, Estação 1) — não quando ela pousa na caixa.
+    bomb.startTimer(BOMB_FUSE_SECONDS);
     const from = new THREE.Vector3(position.x, CHUTE_EXIT_HEIGHT, position.z);
     bomb.group.position.copy(from);
     scene.add(bomb.group);
@@ -59,7 +105,7 @@ export function createDispenser({ scene, position, rotationY = 0, landingPositio
     return bomb;
   }
 
-  function update(dt) {
+  function update(dt, tipPositions) {
     for (let i = falling.length - 1; i >= 0; i--) {
       const drop = falling[i];
       drop.elapsed += dt;
@@ -70,7 +116,14 @@ export function createDispenser({ scene, position, rotationY = 0, landingPositio
         onBombLanded(drop.bomb);
       }
     }
+
+    lever.update(dt, tipPositions);
+
+    if (armed) {
+      blinkPhase += dt * BLINK_SPEED;
+      armedIndicator.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(blinkPhase);
+    }
   }
 
-  return { group, dropBomb, update };
+  return { group, dropBomb, update, setArmed };
 }

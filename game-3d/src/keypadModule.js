@@ -262,5 +262,19 @@ export function createKeypadModule({ onSolved }) {
     dispose,
     // Senha correta — usada pelo panfleto (scanner), nunca exibida no visor.
     code,
+    // Getters exclusivos para leitura de estado em testes automatizados
+    // (harness IWER em tests/e2e/webxr/) — não influenciam a lógica do
+    // teclado, só expõem o que já existia como variável de closure.
+    get inputBuffer() {
+      return inputBuffer;
+    },
+    get solved() {
+      return solved;
+    },
+    // Referências de posição (espaço local de padGroup/displayGroup) para o
+    // teste calcular coordenadas mundiais reais via localToWorld, em vez de
+    // duplicar GRID_SPACING/layout no lado do teste.
+    buttons,
+    confirmLocalPos,
   };
 }

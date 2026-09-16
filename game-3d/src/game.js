@@ -9,6 +9,12 @@ import { createDefuseTable } from './defuseTable.js';
 import { createConveyor } from './conveyor.js';
 import { createTeleportSystem } from './teleport.js';
 import { createGrabSystem } from './grab.js';
+import { createUtilityBelt } from './utilityBelt.js';
+import { createPincers } from './pincers.js';
+import { createScrewdriver } from './screwdriver.js';
+import { createLeverSwitch } from './leverSwitch.js';
+import { createHologramDisplay } from './hologramDisplay.js';
+import { createProximityAlarm } from './proximityAlarm.js';
 import { createBombFlow } from './bombFlow.js';
 import { createScoreManager } from './scoreManager.js';
 import { createRoundTimer } from './roundTimer.js';
@@ -27,11 +33,10 @@ import { createReportPanel } from './reportPanel.js';
 // (ver comentário no fim do arquivo); quando o Frontend existir, ele
 // substitui esse consumo sem precisar tocar neste arquivo.
 //
-// Este arquivo monta o bootstrap Three.js/WebXR e os objetos macro da sala
-// (dispenser, caixa de coleta, scanner, mesa de desarme, esteira) já
-// posicionados via roomLayout.js. O fluxo de scan, o modo de desarme na
-// mesa e a entrega pela esteira ainda entram nas próximas fases da
-// migração descrita no plano de implementação.
+// Este arquivo monta o bootstrap Three.js/WebXR, os objetos macro da sala
+// (dispenser, caixa de coleta, scanner, mesa de desarme, esteira) via
+// roomLayout.js, e conecta o fluxo completo entre eles (scan, modo de
+// desarme, entrega) — todos já wireados abaixo, não pendentes.
 export function createGame() {
   const listeners = { bombDispensed: [], bombScanned: [], bombDelivered: [], roundEnd: [] };
   function emit(event, ...args) {
@@ -54,6 +59,12 @@ export function createGame() {
     100
   );
   camera.position.set(0, 1.6, 0);
+
+  // Pré-requisito de qualquer THREE.PositionalAudio (proximityAlarm.js) —
+  // precisa estar pendurado na câmera pra espacializar o som relativo à
+  // cabeça do jogador.
+  const audioListener = new THREE.AudioListener();
+  camera.add(audioListener);
 
   // "Rig" do jogador: durante uma sessão WebXR ativa, o Three.js sobrescreve
   // a transform da câmera e dos controllers a cada frame com a pose
@@ -89,6 +100,16 @@ export function createGame() {
     const controller = renderer.xr.getController(index);
     player.add(controller);
 
+    // Padrão oficial do three.js pra expor o gamepad de um controller —
+    // haptics.js lê isso via controller.userData.inputSource, já que o
+    // Object3D do controller não guarda essa referência sozinho.
+    controller.addEventListener('connected', (event) => {
+      controller.userData.inputSource = event.data;
+    });
+    controller.addEventListener('disconnected', () => {
+      controller.userData.inputSource = null;
+    });
+
     const grip = renderer.xr.getControllerGrip(index);
     grip.add(controllerModelFactory.createControllerModel(grip));
     player.add(grip);
@@ -101,7 +122,38 @@ export function createGame() {
 
   const layout = createRoomLayout();
 
-  const grabSystem = createGrabSystem({ scene, controllers });
+  // Teleporte precisa existir antes do grab system: force pull (dentro de
+  // grab.js) consulta teleport.isLocked para ficar desativado durante o
+  // modo de desarme, o mesmo travamento de locomoção já usado lá.
+  const teleport = createTeleportSystem({
+    scene,
+    player,
+    controllers,
+    points: layout.teleportPoints,
+  });
+
+  const grabSystem = createGrabSystem({ scene, controllers, isLocked: () => teleport.isLocked });
+
+  // Cinto utilitário: acompanha o corpo do jogador e carrega as ferramentas
+  // da mesa de desarme — alicate no anchor direito, chave de fenda (etapa
+  // traseira) no esquerdo. Mesma rotação de grab que a mesa aplicava antes
+  // pro alicate (lâmina sempre voltada pra frente da mão); a chave de fenda
+  // usa a mesma convenção de eixo (ponta em +Y local, ver screwdriver.js).
+  const utilityBelt = createUtilityBelt({ player, camera });
+  const toolGrabRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+
+  const pincers = createPincers();
+  pincers.group.position.set(0, -0.05, 0);
+  utilityBelt.rightAnchor.add(pincers.group);
+  grabSystem.register(pincers.group, { grabRotation: toolGrabRotation });
+
+  const screwdriver = createScrewdriver();
+  screwdriver.group.position.set(0, -0.05, 0);
+  utilityBelt.leftAnchor.add(screwdriver.group);
+  grabSystem.register(screwdriver.group, { grabRotation: toolGrabRotation });
+
+  const proximityAlarm = createProximityAlarm({ listener: audioListener, grabSystem });
+
   const bombs = [];
 
   const landingPosition = new THREE.Vector3(
@@ -115,20 +167,39 @@ export function createGame() {
     rotationY: layout.stations.dispenser.rotationY,
     landingPosition,
     onBombLanded: (bomb) => {
-      grabSystem.register(bomb.group);
+      grabSystem.register(bomb.group, { throwable: true });
     },
+    // bombFlow ainda não existe nesta linha (const declarada mais abaixo),
+    // mas essa closure só roda em tempo de jogo, bem depois de tudo já
+    // montado — mesmo padrão já usado em onDeliver do conveyor logo abaixo.
+    onLeverPulled: () => bombFlow.confirmSpawn(),
   });
   createCollectionBox({
     scene,
     position: layout.stations.dispenser.position,
     rotationY: layout.stations.dispenser.rotationY,
   });
+  // Holograma de apoio no teto central — complementa o panfleto físico,
+  // mostrando os dados da última bomba escaneada de qualquer ponto da sala.
+  const hologram = createHologramDisplay({ scene, camera });
+
   const scanner = createScanner({
     scene,
     position: layout.stations.scanner.position,
     rotationY: layout.stations.scanner.rotationY,
     grabSystem,
+    hologram,
     onScanned: (bombId) => emit('bombScanned', bombId),
+  });
+
+  // Alavanca de purga do superaquecimento do scanner: 3 puxões, montada perto
+  // do ponto de teleporte central (não em cima dele, pra não competir
+  // visualmente com o disco de teleporte).
+  const centerLever = createLeverSwitch({
+    scene,
+    position: new THREE.Vector3(0.35, 0, 0),
+    requiredPulls: 3,
+    onComplete: () => scanner.purgeOverheat(),
   });
   const scoreManager = createScoreManager();
   const conveyor = createConveyor({
@@ -145,19 +216,15 @@ export function createGame() {
     },
   });
 
-  const teleport = createTeleportSystem({
-    scene,
-    player,
-    controllers,
-    points: layout.teleportPoints,
-  });
-
   const defuseTable = createDefuseTable({
     scene,
     position: layout.stations.defuseTable.position,
     rotationY: layout.stations.defuseTable.rotationY,
     grabSystem,
     teleport,
+    pincers,
+    screwdriver,
+    onCoreExposed: (coreObject) => conveyor.watchCore(coreObject),
   });
 
   controllers.forEach((controller) => {
@@ -178,10 +245,12 @@ export function createGame() {
 
   const bombFlow = createBombFlow({
     onSpawn: () => {
+      dispenser.setArmed(false);
       const bomb = dispenser.dropBomb();
       bombs.push(bomb);
       emit('bombDispensed', bomb.id);
     },
+    onReady: () => dispenser.setArmed(true),
     getPendingCount: () => bombs.filter((bomb) => !bomb.delivered).length,
   });
 
@@ -202,15 +271,23 @@ export function createGame() {
     );
 
     if (running) {
-      dispenser.update(dt);
+      dispenser.update(dt, controllerTipPositions);
       bombFlow.update(dt);
+      // Fusível de cada bomba corre em toda estação, não só na mesa de
+      // desarme — por isso é tickado aqui incondicionalmente, separado do
+      // update() de cada módulo (que só faz algo quando a bomba está ativa).
+      bombs.forEach((bomb) => bomb.tickTimer(dt));
+      proximityAlarm.update(dt, bombs);
       scanner.update(dt, controllerTipPositions, bombs);
+      centerLever.update(dt, controllerTipPositions);
       defuseTable.update(dt, controllerTipPositions, bombs);
       conveyor.update(dt, controllerTipPositions, bombs);
       roundTimer.update(dt);
     }
     teleport.update();
-    grabSystem.update();
+    utilityBelt.update();
+    hologram.update();
+    grabSystem.update(dt);
 
     renderer.render(scene, camera);
   }

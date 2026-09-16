@@ -3,15 +3,21 @@ import { createPamphlet } from './pamphlet.js';
 import { createTextPanel } from './textPanel.js';
 
 const SLOT_RADIUS = 0.35;
-const BUTTON_TOUCH_THRESHOLD = 0.09;
-const SCAN_DURATION = 2;
+const SCAN_DURATION = 5;
 const BLINK_SPEED = 8;
+// Crise de superaquecimento (documento de especificação, Estação 2): a cada
+// N bombas escaneadas com sucesso, o scanner trava até o jogador purgar na
+// alavanca central (game.js cria essa alavanca e chama purgeOverheat()).
+const OVERHEAT_INTERVAL = 3;
 
-// Scanner: o jogador coloca a bomba no slot, toca no botão de "iniciar
-// scan" (mesmo padrão de toque por proximidade dos outros módulos), uma
-// luz verde "lê" a bomba por alguns segundos, e ao final ejeta um panfleto
-// anexado à bomba com as instruções de desarme (pamphlet.js).
-export function createScanner({ scene, position, rotationY = 0, grabSystem, onScanned }) {
+// Scanner: o jogador só precisa ENCOSTAR a bomba no slot — a inserção sozinha
+// já dispara o scan (mecânica ativa, sem botão), com uma barra de progresso
+// real ao longo de SCAN_DURATION. Ao final, ejeta um panfleto anexado à
+// bomba (pamphlet.js) e atualiza o holograma de apoio no teto
+// (hologramDisplay.js, passado via `hologram` — complementa o panfleto, não
+// o substitui). A cada OVERHEAT_INTERVAL scans, o scanner superaquece e
+// recusa novas bombas até ser purgado.
+export function createScanner({ scene, position, rotationY = 0, grabSystem, onScanned, hologram }) {
   const group = new THREE.Group();
   group.position.copy(position);
   group.rotation.y = rotationY;
@@ -53,7 +59,7 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
   group.add(slot);
 
   // Moldura da janela de scan — dá a leitura de "câmara/abertura" ao redor
-  // do plano de luz verde, que antes flutuava sozinho sobre o slot.
+  // do slot onde a bomba é inserida.
   const rimMaterial = new THREE.MeshStandardMaterial({ color: 0x11151a, roughness: 0.5, metalness: 0.4 });
   const rimSideGeometry = new THREE.BoxGeometry(0.54, 0.015, 0.02);
   const rimEndGeometry = new THREE.BoxGeometry(0.02, 0.015, 0.39);
@@ -75,44 +81,43 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
   statusPanel.setText('PRONTO', '#33ff66', '#111111');
   group.add(statusPanel.mesh);
 
-  // Botão de "iniciar scan": base + tampa saltando pra FORA da face frontal
-  // do corpo (que vai até z=0.25) — antes ficava quase embutido na carcaça
-  // (só ~1cm de fora), praticamente invisível encostado nas grelhas ao lado.
-  const scanButtonBase = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.035, 0.035, 0.02, 16),
-    new THREE.MeshStandardMaterial({ color: 0x1c2226, roughness: 0.5, metalness: 0.4 })
+  // Barra de progresso real do scan — trilho fixo + preenchimento que cresce
+  // da esquerda pra direita (geometria com pivô na borda esquerda, mesma
+  // técnica de `geometry.translate` já usada em bomb.js pro corpo da bomba).
+  const PROGRESS_WIDTH = 0.32;
+  const PROGRESS_HEIGHT = 0.025;
+  const progressTrack = new THREE.Mesh(
+    new THREE.BoxGeometry(PROGRESS_WIDTH, PROGRESS_HEIGHT, 0.008),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.7 })
   );
-  scanButtonBase.rotation.x = Math.PI / 2;
-  scanButtonBase.position.set(0.3, 0.62, 0.26);
-  group.add(scanButtonBase);
+  progressTrack.position.set(0, 0.6, 0.251);
+  group.add(progressTrack);
 
-  const buttonMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, 0.04, 16),
-    new THREE.MeshStandardMaterial({ color: 0x33cc66, roughness: 0.4, metalness: 0.2 })
+  const progressFillGeometry = new THREE.BoxGeometry(PROGRESS_WIDTH, PROGRESS_HEIGHT, 0.01);
+  progressFillGeometry.translate(PROGRESS_WIDTH / 2, 0, 0);
+  const progressFill = new THREE.Mesh(
+    progressFillGeometry,
+    new THREE.MeshBasicMaterial({ color: 0x33ff66 })
   );
-  buttonMesh.rotation.x = Math.PI / 2;
-  buttonMesh.position.set(0.3, 0.62, 0.29);
-  group.add(buttonMesh);
-  const buttonPosition = buttonMesh.position.clone();
+  progressFill.position.set(-PROGRESS_WIDTH / 2, 0.6, 0.2515);
+  progressFill.scale.x = 0;
+  group.add(progressFill);
 
-  const scanLight = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.5, 0.35),
-    new THREE.MeshBasicMaterial({
-      color: 0x33ff66,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-    })
+  // Luz de aviso de superaquecimento — pisca no topo do console enquanto
+  // `overheated` estiver ativo.
+  const overheatLight = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xff3333, emissive: 0xff2222, emissiveIntensity: 0 })
   );
-  scanLight.rotation.x = -Math.PI / 2;
-  scanLight.position.set(0, 0.95, 0);
-  group.add(scanLight);
+  overheatLight.position.set(0.28, 0.85, 0.25);
+  group.add(overheatLight);
 
   let scanning = false;
   let scanTimer = 0;
   let currentBomb = null;
-  let touchingButton = false;
   let blinkPhase = 0;
+  let scansCompleted = 0;
+  let overheated = false;
 
   function slotWorldPosition() {
     const p = new THREE.Vector3();
@@ -135,13 +140,13 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
     scanning = true;
     scanTimer = SCAN_DURATION;
     currentBomb = bomb;
+    progressFill.scale.x = 0;
     statusPanel.setText('ESCANEANDO...', '#ffcc33', '#111111');
   }
 
   function finishScan() {
     scanning = false;
-    scanLight.material.opacity = 0;
-    statusPanel.setText('PRONTO', '#33ff66', '#111111');
+    progressFill.scale.x = 0;
     if (currentBomb && !currentBomb.hasPamphlet) {
       const pamphlet = createPamphlet(currentBomb);
       pamphlet.group.position.set(0.18, 0.05, 0);
@@ -150,33 +155,48 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
       currentBomb.pamphletGroup = pamphlet.group;
       currentBomb.markScanned();
       onScanned?.(currentBomb.id);
+      hologram?.showBomb(currentBomb);
+
+      scansCompleted += 1;
+      if (scansCompleted % OVERHEAT_INTERVAL === 0) {
+        overheated = true;
+      }
     }
     currentBomb = null;
+    statusPanel.setText(
+      overheated ? ['SUPERAQUECIDO', 'PURGUE NO CENTRO'] : 'PRONTO',
+      overheated ? '#ff3333' : '#33ff66',
+      '#111111'
+    );
+  }
+
+  // Chamado pela alavanca de purga central (game.js) ao completar os 3
+  // puxões — não precisa zerar `scansCompleted`: usando módulo, o próximo
+  // superaquecimento naturalmente só volta a acontecer depois de mais
+  // OVERHEAT_INTERVAL scans a partir daqui.
+  function purgeOverheat() {
+    overheated = false;
+    statusPanel.setText('PRONTO', '#33ff66', '#111111');
   }
 
   function update(dt, tipPositions, bombs) {
+    if (overheated) {
+      blinkPhase += dt * BLINK_SPEED;
+      overheatLight.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(blinkPhase);
+      return;
+    }
+    overheatLight.material.emissiveIntensity = 0;
+
     if (scanning) {
       scanTimer -= dt;
-      blinkPhase += dt * BLINK_SPEED;
-      scanLight.material.opacity = 0.4 + 0.3 * Math.sin(blinkPhase);
+      progressFill.scale.x = THREE.MathUtils.clamp(1 - scanTimer / SCAN_DURATION, 0, 1);
       if (scanTimer <= 0) finishScan();
       return;
     }
 
-    let touching = false;
-    for (const tip of tipPositions) {
-      if (group.localToWorld(buttonPosition.clone()).distanceTo(tip) <= BUTTON_TOUCH_THRESHOLD) {
-        touching = true;
-        break;
-      }
-    }
-
-    if (touching && !touchingButton) {
-      const bomb = findBombInSlot(bombs);
-      if (bomb) startScan(bomb);
-    }
-    touchingButton = touching;
+    const bomb = findBombInSlot(bombs);
+    if (bomb && !bomb.scanned) startScan(bomb);
   }
 
-  return { group, update };
+  return { group, update, purgeOverheat };
 }

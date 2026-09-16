@@ -1,16 +1,6 @@
 import * as THREE from 'three';
 import { createTextPanel } from './textPanel.js';
-
-const COLOR_NAMES = {
-  0xdd2222: 'VERMELHO',
-  0x2255dd: 'AZUL',
-  0xdddd22: 'AMARELO',
-  0x22aa44: 'VERDE',
-};
-
-function colorName(hex) {
-  return COLOR_NAMES[hex] ?? '???';
-}
+import { colorName } from './colorNames.js';
 
 // Panfleto com as instruções de desarme de uma bomba específica: senha, cor
 // do fio certo e cor do botão certo. Texto grande — vai ser lido segurando
