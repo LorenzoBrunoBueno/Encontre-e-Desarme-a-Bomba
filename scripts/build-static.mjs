@@ -18,7 +18,12 @@ rmSync(distDir, { recursive: true, force: true });
 mkdirSync(distDir, { recursive: true });
 
 console.log('[build-static] copiando frontend/ -> dist/...');
-cpSync(frontendDir, distDir, { recursive: true });
+cpSync(frontendDir, distDir, {
+  recursive: true,
+  // instrucao.md é registro de decisão pra quem desenvolve, não conteúdo
+  // do jogo — sem isso, ele vira um arquivo estático público em /instrucao.md
+  filter: (src) => path.basename(src) !== 'instrucao.md',
+});
 
 console.log('[build-static] instalando e buildando game-3d/...');
 execFileSync('npm', ['ci'], { cwd: gameDir, stdio: 'inherit', shell: true });
