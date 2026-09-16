@@ -1,0 +1,48 @@
+/* Tokens do tema "Liquid Glass" (variante industrial/alerta) — escopados em
+   :root deste /frontend, mesma técnica (blur+saturate, sheen, glow por
+   estado, distorção SVG) do guia de referência, paleta nova pra não
+   confundir com o produto de onde a técnica foi portada. */
+:root {
+  color-scheme: dark;
+
+  /* fundo — sala de desarme (aço/concreto escuro), sem tom azulado */
+  --steel-deep: #14181c;
+  --steel-mid: #1c2228;
+  --steel-light: #2a323a;
+
+  --ink: #eef1f3;
+  --muted: rgba(238, 241, 243, 0.62);
+  --faint: rgba(238, 241, 243, 0.4);
+
+  /* acentos de alerta/status */
+  --amber: #f0a63a;
+  --safe-green: #3ecf8e;
+  --danger-red: #e2534d;
+
+  --medal-gold: #e6c15c;
+  --medal-silver: #c7ccd1;
+  --medal-bronze: #b3703a;
+
+  /* borda/glow por estado — trocam de cor, nunca de forma */
+  --border-default: rgba(240, 166, 58, 0.28);
+  --glow-default: rgba(240, 166, 58, 0.35);
+  --border-erro: rgba(226, 83, 77, 0.55);
+  --glow-erro: rgba(226, 83, 77, 0.45);
+  --border-ok: rgba(62, 207, 142, 0.5);
+  --glow-ok: rgba(62, 207, 142, 0.4);
+
+  --panel-border: rgba(255, 255, 255, 0.14);
+  --panel-border-strong: rgba(255, 255, 255, 0.28);
+
+  /* intensidade do vidro por tamanho de superfície — mesma regra do guia:
+     painéis grandes precisam "derreter" o fundo por completo, controles
+     pequenos só precisam ler como vidro sem pesar. */
+  --panel-blur: 38px;
+  --panel-sat: 150%;
+  --pill-blur: 8px;
+  --pill-sat: 200%;
+
+  --font-display: 'Manrope', -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+}

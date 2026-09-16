@@ -19,6 +19,16 @@ jobs:
         with:
           submodules: true
           lfs: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # /frontend (estático) e /game-3d (Vite) têm bundlers/etapas de build
+      # diferentes — combinados aqui em /dist por scripts/build-static.mjs
+      # (ver frontend/instrucao.md) antes de entregar pro Oryx, que só
+      # precisa fazer upload do resultado (skip_app_build abaixo) e buildar
+      # a API (/api, um simples `npm install` de Azure Functions).
+      - name: Build frontend + game-3d
+        run: npm run build
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
@@ -28,9 +38,10 @@ jobs:
           action: "upload"
           ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
           # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "/game-3d" # App source code path
-          api_location: "" # Api source code path - optional
+          app_location: "/" # App source code path
+          api_location: "/api" # Api source code path - optional
           output_location: "dist" # Built app content directory - optional
+          skip_app_build: true # já buildado pelo passo "Build frontend + game-3d" acima
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Encontre e Desarme a Bomba</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/liquid-glass.css" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <div class="sea-backdrop"></div>
+
+    <!-- filtro SVG de distorção líquida usado pelos modais (.glass-modal::before) -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <filter id="liquid-distortion">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="7" result="noise"></feTurbulence>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="10" xChannelSelector="R" yChannelSelector="G"></feDisplacementMap>
+        </filter>
+      </defs>
+    </svg>
+
+    <div class="shell">
+      <section class="glass-panel hero">
+        <div class="hero-top">
+          <div>
+            <span class="eyebrow">Projeto acadêmico — ADS Senac Joinville</span>
+            <h1>Encontre e Desarme a Bomba</h1>
+            <p class="sub">
+              Uma linha de produção contínua de bombas chega até você. Escaneie, leia o
+              panfleto, corte o fio certo, aperte o botão certo, digite a senha — e entregue
+              antes que o tempo acabe. Você só descobre se acertou no relatório final.
+            </p>
+          </div>
+          <span class="glass-badge" id="session-badge">Nenhum jogador logado</span>
+        </div>
+        <div class="hero-actions">
+          <button class="btn primary" id="enter-vr-btn" disabled>Entrar em VR</button>
+          <button class="btn ghost" id="session-action-btn">Entrar / cadastrar</button>
+        </div>
+      </section>
+
+      <section class="glass-panel">
+        <span class="eyebrow">Placar</span>
+        <h2>Top 10</h2>
+        <div id="leaderboard"><p class="empty-state">Carregando…</p></div>
+      </section>
+
+      <footer class="page-footer">Defuse VR — WebXR · Meta Quest 3</footer>
+    </div>
+
+    <!-- modal de cadastro/login -->
+    <div class="glass-scrim" id="auth-scrim" hidden>
+      <div class="glass-modal">
+        <div class="modal-head">
+          <h3>Identificação</h3>
+          <button class="btn-close" id="auth-close" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="auth-tabs">
+          <button class="btn" id="auth-tab-register" type="button" aria-pressed="true">Cadastrar</button>
+          <button class="btn" id="auth-tab-login" type="button" aria-pressed="false">Entrar</button>
+        </div>
+        <form id="auth-form">
+          <div class="field">
+            <label class="field-label" for="auth-name">Nome</label>
+            <div class="glass-pill-wrap" id="auth-pill-wrap">
+              <div class="glass-pill">
+                <input id="auth-name" type="text" placeholder="Como te chamamos?" minlength="2" maxlength="24" required autocomplete="username" />
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="auth-pin">PIN (4 a 6 dígitos)</label>
+            <div class="glass-pill">
+              <input id="auth-pin" type="password" inputmode="numeric" pattern="\d{4,6}" placeholder="••••" required autocomplete="current-password" />
+            </div>
+          </div>
+          <p class="pill-error-text" id="auth-error"></p>
+          <div class="modal-actions">
+            <button class="btn primary" id="auth-submit" type="submit">Criar conta</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- modal de configurações -->
+    <div class="glass-scrim" id="settings-scrim" hidden>
+      <div class="glass-modal">
+        <div class="modal-head">
+          <h3>Configurações</h3>
+          <button class="btn-close" id="settings-close" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <form id="settings-form">
+          <div class="field">
+            <label class="field-label" for="settings-name">Nome</label>
+            <div class="glass-pill-wrap" id="settings-pill-wrap">
+              <div class="glass-pill">
+                <input id="settings-name" type="text" minlength="2" maxlength="24" required />
+              </div>
+            </div>
+          </div>
+          <p class="pill-error-text" id="settings-error"></p>
+          <div class="modal-actions">
+            <button class="btn primary" id="settings-submit" type="submit">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script type="module" src="js/home.js"></script>
+  </body>
+</html>

@@ -10,4 +10,5 @@ game-3d/playwright-report/
 game-3d/blob-report/
 game-3d/playwright/.cache/
 
-game-3d/instrucao.md
+instrucao.md
+.claude/
