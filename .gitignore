@@ -2,9 +2,12 @@ node_modules/
 dist/
 .env
 local.settings.json
+.azurite/
 
 # Playwright (testes E2E do game-3d)
 game-3d/test-results/
 game-3d/playwright-report/
 game-3d/blob-report/
 game-3d/playwright/.cache/
+
+game-3d/instrucao.md

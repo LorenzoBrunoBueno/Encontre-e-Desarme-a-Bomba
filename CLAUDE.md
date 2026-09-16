@@ -269,25 +269,44 @@ game.on('roundEnd', (finalScore, deathsCaused) => {...})
 
 ### Contrato de API com o Backend
 
+Expandido além do desenho original de duas rotas — agora inclui identidade
+de jogador (nome + PIN) e progressão de fases persistente. Contrato
+implementado (`/api` já existe no repositório):
+
 ```
-POST /api/scores { playerName, score, deathsCaused }
-GET  /api/leaderboard
+POST  /api/settings/register   { name, pin }               → cria conta; 409 se nome já existe
+POST  /api/settings/login      { name, pin }                → resolve playerId numa máquina nova
+GET   /api/settings/{playerId}
+PATCH /api/settings/{playerId} { name?, settings? }
+POST  /api/scores              { playerId, score, deathsCaused }
+GET   /api/leaderboard
+GET   /api/progress/{playerId}
+PATCH /api/progress/{playerId} { highestPhaseUnlocked?, currentPhase? }
 ```
 
 Como frontend e API ficam sob o mesmo domínio quando publicados como Azure
 Static Web App, não há problema de CORS a resolver.
 
-> Nota: os exemplos de código dos endpoints na seção "Backend e hospedagem
-> (Azure)" abaixo ainda usam o campo antigo `defusedCount` — ajustar para
-> `deathsCaused` (e o que mais for definido nos "Pontos em aberto") quando
-> for implementar de fato.
+Identidade: o jogador se registra com nome + **PIN numérico de 4-6 dígitos**
+(não senha alfanumérica completa — o cadastro acontece pelo teclado virtual
+do navegador do Quest, e não há dado sensível em jogo, então não compensa o
+custo de um sistema de auth completo). O `playerId` (UUID) retornado no
+registro/login é guardado no `localStorage` do frontend e funciona como a
+credencial de fato para `scores`/`progress`/`settings` dali em diante — o
+PIN só é reapresentado para "logar" numa máquina nova que ainda não tem esse
+ID salvo. Trocar de nome não afeta progresso, histórico nem leaderboard,
+porque nenhum dos três é indexado por nome, só por `playerId`.
+
+> Detalhamento completo (schema do Table Storage, modelo de ameaça da
+> identidade por PIN, pendências) em `api/instrucao.md` — segue o mesmo
+> padrão do `game-3d/instrucao.md`, não repetido aqui.
 
 ### Estrutura de pastas sugerida
 
 ```
 /frontend        → HTML/CSS, telas, chamadas à API
 /game-3d         → cena Three.js, WebXR, BombManager, módulos
-/api             → Azure Functions (scores, leaderboard) — ver detalhes abaixo
+/api             → Azure Functions (settings, scores, leaderboard, progress) — ver detalhes abaixo
 /shared          → contrato de eventos e tipos compartilhados (se usarem TS)
 ```
 
@@ -313,89 +332,42 @@ Usando o modelo de programação v4 do Node.js para Azure Functions:
 ```
 /api/
 ├── src/
-│   └── functions/
-│       ├── scores.js       → POST /api/scores
-│       └── leaderboard.js  → GET  /api/leaderboard
+│   ├── functions/
+│   │   ├── settingsRegister.js → POST  /api/settings/register
+│   │   ├── settingsLogin.js    → POST  /api/settings/login
+│   │   ├── settings.js         → GET/PATCH /api/settings/{playerId}
+│   │   ├── scores.js           → POST  /api/scores
+│   │   ├── leaderboard.js      → GET   /api/leaderboard
+│   │   └── progress.js         → GET/PATCH /api/progress/{playerId}
+│   └── lib/                    → TableClient, hash de PIN e CRUD de players
+│                                  compartilhados entre as 6 functions
 ├── host.json
 ├── package.json
+├── instrucao.md            → decisões de design e schema, ver seção acima
 └── local.settings.json     → connection strings locais (NÃO commitar)
 ```
 
-### Endpoint de salvar pontuação
-
-```js
-// api/src/functions/scores.js
-const { app } = require('@azure/functions');
-const { TableClient } = require('@azure/data-tables');
-const { randomUUID } = require('crypto');
-
-app.http('scores', {
-  methods: ['POST'],
-  route: 'scores',
-  handler: async (request) => {
-    const body = await request.json();
-    const { playerName, score, defusedCount } = body;
-
-    if (!playerName || typeof score !== 'number') {
-      return { status: 400, jsonBody: { error: 'playerName e score são obrigatórios' } };
-    }
-
-    const client = TableClient.fromConnectionString(
-      process.env.AZURE_TABLES_CONNECTION_STRING,
-      'scores'
-    );
-
-    await client.createEntity({
-      partitionKey: 'scores',
-      rowKey: randomUUID(),
-      playerName,
-      score,
-      defusedCount: defusedCount ?? 0,
-      createdAt: new Date().toISOString(),
-    });
-
-    return { status: 201, jsonBody: { success: true } };
-  },
-});
-```
-
-### Endpoint de leaderboard
-
-```js
-// api/src/functions/leaderboard.js
-const { app } = require('@azure/functions');
-const { TableClient } = require('@azure/data-tables');
-
-app.http('leaderboard', {
-  methods: ['GET'],
-  route: 'leaderboard',
-  handler: async () => {
-    const client = TableClient.fromConnectionString(
-      process.env.AZURE_TABLES_CONNECTION_STRING,
-      'scores'
-    );
-
-    const entities = [];
-    for await (const entity of client.listEntities()) {
-      entities.push(entity);
-    }
-    entities.sort((a, b) => b.score - a.score);
-
-    return { jsonBody: entities.slice(0, 10) };
-  },
-});
-```
+O código-fonte de cada endpoint é a referência definitiva (não duplicado
+aqui); `api/instrucao.md` documenta o schema do Table Storage e o porquê das
+decisões.
 
 Persistência: **Azure Table Storage** (mais simples e barato que Cosmos DB
-para um leaderboard, que é essencialmente uma lista ordenável de registros
-pequenos).
+para os dados envolvidos — pontuação, progresso e settings são todos
+registros pequenos e a leitura mais pesada, o leaderboard, é só um top 10).
 
 ### Desenvolvimento local
 
 ```bash
 npm install -g @azure/static-web-apps-cli
 npm install -g azure-functions-core-tools@4
+npm install -g azurite
 ```
+
+O `local.settings.json` do `/api` aponta `AzureWebJobsStorage` e
+`AZURE_TABLES_CONNECTION_STRING` para `UseDevelopmentStorage=true` — precisa
+do **Azurite** (emulador de Storage) rodando num terminal separado (`azurite`
+na raiz de algum diretório de dados) antes de `func start`/`swa start`
+funcionarem local, senão as chamadas às tabelas falham.
 
 Na raiz do projeto:
 
