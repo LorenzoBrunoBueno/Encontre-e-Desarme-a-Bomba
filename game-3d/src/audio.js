@@ -48,3 +48,41 @@ export function createTensionCue() {
 
   return { start, stop };
 }
+
+// Som de entrega da esteira (RoomRefactor item 3) — um "clang" curto tocado
+// exatamente no momento em que a bomba cruza a cortina PVC no vão de saída,
+// mesma técnica de osciladores acima. Isolado e mínimo de propósito: a
+// passada completa de SFX por estação (scanner, corte de fio, teclado etc.)
+// continua pendente, documentada em game-3d/instrucao.md seção 3.2 — não é
+// escopo deste refactor de sala.
+export function createDeliveryChime() {
+  let audioContext = null;
+
+  function ensureContext() {
+    if (!audioContext) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioContextClass();
+    }
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    return audioContext;
+  }
+
+  function play() {
+    const ctx = ensureContext();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(520, ctx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.25);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+    oscillator.connect(gain).connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.3);
+  }
+
+  return { play };
+}

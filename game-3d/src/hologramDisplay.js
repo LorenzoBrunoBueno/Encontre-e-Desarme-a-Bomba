@@ -1,11 +1,8 @@
 import * as THREE from 'three';
 import { createTextPanel } from './textPanel.js';
 import { colorName } from './colorNames.js';
+import { CEILING_HEIGHT } from './roomLayout.js';
 
-// Mesmo valor de CEILING_HEIGHT em dispenser.js — duplicado por simplicidade
-// (não existe um módulo de constantes compartilhadas no projeto); ajustar os
-// dois juntos se a altura do teto mudar.
-const CEILING_HEIGHT = 2.6;
 const PANEL_WIDTH = 1.1;
 const PANEL_HEIGHT = 0.55;
 

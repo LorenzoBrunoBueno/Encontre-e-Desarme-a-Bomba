@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
-import { createRoomLayout } from './roomLayout.js';
+import { createRoomLayout, ROOM_HALF_X, ROOM_HALF_Z, ROOM_CEILING_Y } from './roomLayout.js';
+import { createTextPanel } from './textPanel.js';
 import { createDispenser } from './dispenser.js';
 import { createCollectionBox } from './collectionBox.js';
 import { createScanner } from './scanner.js';
@@ -80,18 +81,85 @@ export function createGame() {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
+  // Shadow mapping (RoomRefactor etapa 0) — a causa raiz mais barata do
+  // "objetos flutuando" reportado nos prints: mesa, scanner e alavanca já
+  // tocam o chão matematicamente (ver dispenser.js/defuseTable.js/
+  // leverSwitch.js), só faltava a sombra de contato que confirma isso pro
+  // olho. PCFSoftShadowMap suaviza a borda sem custo alto pra uma sala
+  // pequena como esta.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  // Luz global reduzida (era Hemisphere 1.2 + Directional 1) — dá espaço de
+  // contraste pra iluminação por zona (seção 8 do guia), principalmente o
+  // spot dedicado da mesa de desarme, que precisa ler como "mais escuro ao
+  // redor, foco na ação principal".
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.7));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
   dirLight.position.set(3, 10, 5);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(1024, 1024);
+  dirLight.shadow.camera.left = -ROOM_HALF_X - 1;
+  dirLight.shadow.camera.right = ROOM_HALF_X + 1;
+  dirLight.shadow.camera.top = ROOM_HALF_Z + 1;
+  dirLight.shadow.camera.bottom = -ROOM_HALF_Z - 1;
+  dirLight.shadow.camera.near = 1;
+  dirLight.shadow.camera.far = 20;
   scene.add(dirLight);
 
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 10),
+    new THREE.PlaneGeometry(ROOM_HALF_X * 2, ROOM_HALF_Z * 2),
     new THREE.MeshStandardMaterial({ color: 0x555566 })
   );
   floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
   scene.add(floor);
+
+  // Casca da sala (RoomRefactor, achado adicional não coberto pelo guia
+  // original): antes não existia NENHUMA parede ou teto — os objetos
+  // flutuavam contra o scene.background sólido. Pré-requisito de vários
+  // itens do guia (duto até a parede, vão de saída da esteira, painéis na
+  // parede livre).
+  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x3d3d46, roughness: 0.85, metalness: 0.05 });
+  const WALL_THICKNESS = 0.15;
+
+  function addWall(width, height, position, rotationY) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(width, height, WALL_THICKNESS), wallMaterial);
+    wall.position.copy(position);
+    wall.rotation.y = rotationY;
+    wall.receiveShadow = true;
+    wall.castShadow = true;
+    scene.add(wall);
+    return wall;
+  }
+
+  addWall(ROOM_HALF_X * 2, ROOM_CEILING_Y, new THREE.Vector3(0, ROOM_CEILING_Y / 2, -ROOM_HALF_Z), 0); // norte
+  addWall(ROOM_HALF_X * 2, ROOM_CEILING_Y, new THREE.Vector3(0, ROOM_CEILING_Y / 2, ROOM_HALF_Z), Math.PI); // sul (livre p/ decoração)
+  addWall(ROOM_HALF_Z * 2, ROOM_CEILING_Y, new THREE.Vector3(ROOM_HALF_X, ROOM_CEILING_Y / 2, 0), Math.PI / 2); // leste
+  addWall(ROOM_HALF_Z * 2, ROOM_CEILING_Y, new THREE.Vector3(-ROOM_HALF_X, ROOM_CEILING_Y / 2, 0), Math.PI / 2); // oeste
+
+  const ceiling = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROOM_HALF_X * 2, ROOM_HALF_Z * 2),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.9 })
+  );
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.y = ROOM_CEILING_Y;
+  scene.add(ceiling);
+
+  // Decoração enxuta (RoomRefactor item 9, escopo reduzido): painéis de
+  // status na parede sul, que ficou livre no layout (oposta ao conjunto
+  // dispenser+scanner na parede norte) — mesma técnica de textPanel.js já
+  // usada no scanner/reportPanel.
+  const wallPanelA = createTextPanel({ width: 0.6, height: 0.3, fontSize: 32 });
+  wallPanelA.setText(['DEFUSE INC.', 'SETOR DE TRIAGEM'], '#66ccff', '#0d0d12');
+  wallPanelA.mesh.position.set(-1.1, 1.6, ROOM_HALF_Z - 0.05);
+  wallPanelA.mesh.rotation.y = Math.PI;
+  scene.add(wallPanelA.mesh);
+  const wallPanelB = createTextPanel({ width: 0.6, height: 0.3, fontSize: 32 });
+  wallPanelB.setText(['MANTENHA A CALMA', 'DESARME COM CUIDADO'], '#ffaa33', '#0d0d12');
+  wallPanelB.mesh.position.set(1.1, 1.6, ROOM_HALF_Z - 0.05);
+  wallPanelB.mesh.rotation.y = Math.PI;
+  scene.add(wallPanelB.mesh);
 
   const controllerModelFactory = new XRControllerModelFactory();
   const controllers = [];
@@ -166,6 +234,8 @@ export function createGame() {
     position: layout.stations.dispenser.position,
     rotationY: layout.stations.dispenser.rotationY,
     landingPosition,
+    wallRunLength: layout.stations.dispenser.wallRunLength,
+    grabSystem,
     onBombLanded: (bomb) => {
       grabSystem.register(bomb.group, { throwable: true });
     },
@@ -192,6 +262,18 @@ export function createGame() {
     onScanned: (bombId) => emit('bombScanned', bombId),
   });
 
+  // Iluminação por zona (RoomRefactor item 8) — azul frio e constante no
+  // scanner ("leitura tecnológica"); o pulso âmbar do dispenser já mora em
+  // dispenser.js (junctionLight, disparado a cada queda), não precisa de
+  // outra luz aqui.
+  const scannerLight = new THREE.PointLight(0x3fb8ff, 0.8, 2.2);
+  scannerLight.position.set(
+    layout.stations.scanner.position.x,
+    1.3,
+    layout.stations.scanner.position.z + 0.4
+  );
+  scene.add(scannerLight);
+
   // Alavanca de purga do superaquecimento do scanner: 3 puxões, montada perto
   // do ponto de teleporte central (não em cima dele, pra não competir
   // visualmente com o disco de teleporte).
@@ -206,6 +288,7 @@ export function createGame() {
     scene,
     position: layout.stations.conveyor.position,
     rotationY: layout.stations.conveyor.rotationY,
+    wallRunLength: layout.stations.conveyor.wallRunLength,
     grabSystem,
     onDeliver: (bombId, wasCorrect) => {
       scoreManager.recordDelivery(bombId, wasCorrect);
@@ -227,6 +310,21 @@ export function createGame() {
     onCoreExposed: (coreObject) => conveyor.watchCore(coreObject),
   });
 
+  // Spot branco focado na mesa de desarme (RoomRefactor item 8) — com a luz
+  // global já reduzida acima, esse é o ponto mais iluminado da sala,
+  // reforçando "foco na ação principal" sem precisar escurecer o resto na
+  // mão (a queda de intensidade com a distância já faz esse trabalho).
+  const defuseTableLight = new THREE.SpotLight(0xffffff, 1.6, 4, Math.PI / 5, 0.4);
+  defuseTableLight.position.set(
+    layout.stations.defuseTable.position.x,
+    2.2,
+    layout.stations.defuseTable.position.z
+  );
+  defuseTableLight.target.position.copy(layout.stations.defuseTable.position);
+  defuseTableLight.castShadow = true;
+  scene.add(defuseTableLight);
+  scene.add(defuseTableLight.target);
+
   controllers.forEach((controller) => {
     controller.addEventListener('selectstart', () => defuseTable.handleTrigger());
   });
@@ -247,11 +345,32 @@ export function createGame() {
     onSpawn: () => {
       dispenser.setArmed(false);
       const bomb = dispenser.dropBomb();
+      // Bombas nascem DEPOIS do scene.traverse abaixo (criadas em tempo de
+      // jogo, não no setup) — sem sombra própria não venderiam a queda na
+      // caixa de coleta (item 2), então ganham as flags aqui, na origem.
+      bomb.group.traverse((object) => {
+        if (object.isMesh) {
+          object.castShadow = true;
+          object.receiveShadow = true;
+        }
+      });
       bombs.push(bomb);
       emit('bombDispensed', bomb.id);
     },
     onReady: () => dispenser.setArmed(true),
     getPendingCount: () => bombs.filter((bomb) => !bomb.delivered).length,
+  });
+
+  // Liga cast/receiveShadow em toda malha já criada acima (RoomRefactor
+  // etapa 0) — mais simples e barato, pra uma sala deste tamanho, do que
+  // marcar objeto por objeto em cada módulo (dispenser/scanner/mesa/esteira/
+  // caixa/alavanca); meshes puramente decorativos (indicadores, textos)
+  // ganham a flag sem efeito visual perceptível, sem custo real.
+  scene.traverse((object) => {
+    if (object.isMesh) {
+      object.castShadow = true;
+      object.receiveShadow = true;
+    }
   });
 
   window.addEventListener('resize', () => {
