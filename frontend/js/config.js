@@ -11,4 +11,4 @@ export const API_BASE = '/api';
 // https, não http: game-3d/vite.config.js usa vite-plugin-mkcert (WebXR
 // exige contexto seguro mesmo em dev), e strictPort garante que a porta
 // é sempre 5173 quando o dev server sobe com sucesso.
-export const GAME_URL = isLocalDev ? 'https://192.168.10.139:5173/' : '/game/';
+export const GAME_URL = isLocalDev ? 'https://localhost:5173/' : '/game/';
