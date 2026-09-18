@@ -300,5 +300,16 @@ export function createDispenser({
     if (newKeypad !== undefined) keypadTouchThreshold = newKeypad;
   }
 
-  return { group, dropBomb, update, setArmed, reset, setDifficulty };
+  return {
+    group,
+    dropBomb,
+    update,
+    setArmed,
+    reset,
+    setDifficulty,
+    // Posição da alavanca (não do corpo do dispenser, que fica fora de
+    // alcance no teto) — usada pelo tutorial guiado da primeira bomba
+    // (game.js#showTutorialStep) pra apontar a seta no lugar certo.
+    leverPosition,
+  };
 }

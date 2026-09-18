@@ -225,5 +225,13 @@ export function createScanner({
     statusPanel.setText('PRONTO', '#33ff66', '#111111');
   }
 
-  return { group, update, purgeOverheat, reset };
+  return {
+    group,
+    update,
+    purgeOverheat,
+    reset,
+    // Usado pelo tutorial guiado da primeira bomba (game.js#showTutorialStep)
+    // pra apontar a seta exatamente no slot, não no console inteiro.
+    getSlotPosition: slotWorldPosition,
+  };
 }

@@ -34,6 +34,7 @@ import { createScoreManager } from './scoreManager.js';
 import { createRoundTimer } from './roundTimer.js';
 import { createTensionCue, createSfxPlayer } from './audio.js';
 import { createReportPanel } from './reportPanel.js';
+import { createTutorialGuide } from './tutorialGuide.js';
 import { getDifficultyConfig, clampPhase, MAX_PHASE } from './difficulty.js';
 
 // Fachada do jogo — implementa o contrato definido no CLAUDE.md para o
@@ -473,7 +474,14 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     rotationY: layout.stations.scanner.rotationY,
     grabSystem,
     hologram,
-    onScanned: (bombId) => emit('bombScanned', bombId),
+    onScanned: (bombId) => {
+      emit('bombScanned', bombId);
+      // Tutorial guiado da primeira bomba (game.js#showTutorialStep) — só
+      // avança se for a bomba que ele está acompanhando (o jogador pode ter
+      // escaneado outra fora de ordem, mas isso não deveria mexer no
+      // tutorial da primeira).
+      if (tutorialStep === 'scanner' && bombId === tutorialBombId) showTutorialStep('defuseApproach');
+    },
     overheatInterval: difficulty.scanOverheatInterval,
     sfx,
   });
@@ -546,6 +554,10 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
       if (index !== -1) bombs.splice(index, 1);
       bombFlow.notifyDelivered();
       emit('bombDelivered', bombId, wasCorrect);
+      if (tutorialStep === 'conveyor' && bombId === tutorialBombId) {
+        tutorialBomb = null;
+        showTutorialStep('done');
+      }
     },
     cartHitRadius: difficulty.cartHitRadius,
     cartCycleSpeed: difficulty.cartCycleSpeed,
@@ -564,6 +576,18 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     // montado — mesmo padrão já usado em onLeverPulled do dispenser com
     // `bombFlow`, ver comentário lá.
     onCoreExposed: (coreObject) => trashBin.watchCore(coreObject),
+    // Tutorial guiado da primeira bomba (game.js#showTutorialStep) — precisa
+    // saber SE a bomba que entrou no modo é a que está acompanhando (não só
+    // que "alguma bomba" entrou), por isso defuseTable.js repassa `bomb`
+    // junto do booleano.
+    onModeChange: (isActive, enteredBomb) => {
+      if (isActive && enteredBomb?.id === tutorialBombId && (tutorialStep === 'scanner' || tutorialStep === 'defuseApproach')) {
+        showTutorialStep('wire');
+      }
+      if (!isActive && tutorialStep === 'exitMode') {
+        showTutorialStep('conveyor');
+      }
+    },
   });
 
   // Lixeira de descarte do núcleo/bateria — antes vivia dentro do duto da
@@ -608,6 +632,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   });
 
   const reportPanel = createReportPanel(camera, controllers);
+  const tutorialGuide = createTutorialGuide({ scene, camera });
   const tensionCue = createTensionCue();
   const roundTimer = createRoundTimer({
     onTensionStart: () => tensionCue.start(),
@@ -665,6 +690,11 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
         });
         bombs.push(bomb);
         emit('bombDispensed', bomb.id);
+        if (tutorialStep === 'dispenser' && tutorialBombId === null) {
+          tutorialBombId = bomb.id;
+          tutorialBomb = bomb;
+          showTutorialStep('scanner');
+        }
       },
       onReady: () => {
         dispenser.setArmed(true);
@@ -760,6 +790,17 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     roundTimer.reset();
     reportPanel.hide();
 
+    // O tutorial guiado é só da PRIMEIRA bomba da sessão — nunca deveria
+    // reaparecer numa rodada continuada. Salvaguarda pro caso raro de o
+    // timer zerar com o tutorial ainda ativo (jogador muito lento na bomba
+    // 1): força pra "done" em vez de deixar a seta apontando pra uma bomba
+    // que resetRound acabou de descartar.
+    if (tutorialStep !== 'done') {
+      tutorialStep = 'done';
+      tutorialBomb = null;
+      tutorialGuide.hide();
+    }
+
     running = true;
   }
 
@@ -779,6 +820,93 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   function handleExit() {
     reportPanel.hide();
     emit('roundExit');
+  }
+
+  // Tutorial guiado da PRIMEIRA bomba da sessão (pedido do usuário): uma
+  // seta + texto (tutorialGuide.js) acompanha o jogador pelo fluxo completo
+  // — dispenser → scanner → mesa (fio/botão/senha, na ordem que ele for
+  // completando, já que os 3 desafios são simultâneos e sem ordem exigida,
+  // ver CLAUDE.md "Toda bomba apresenta os 3 tipos de desafio frontais
+  // simultaneamente") → sair do modo → esteira. Só acontece UMA vez por
+  // sessão (não repete em rodadas continuadas, ver resetRound acima, nem se
+  // o jogador pular o scanner pelo atalho permitido — nesse caso o passo
+  // 'scanner' simplesmente nunca termina de mostrar e o fluxo pula direto
+  // pra 'wire' quando a bomba entra no modo de desarme de qualquer jeito).
+  let tutorialStep = 'dispenser';
+  let tutorialBombId = null;
+  let tutorialBomb = null;
+  // "Tentou" (não "acertou") — diferente de wireResult/buttonResult (bomb.js),
+  // o código da senha só marca sucesso se estiver CERTO, e o buffer volta a
+  // ficar vazio depois de uma tentativa errada (keypadModule.js#pressConfirm).
+  // Sem essa flag própria, uma tentativa errada faria o tutorial "esquecer"
+  // que o jogador já tentou e apontar pro teclado de novo pra sempre.
+  let tutorialKeypadAttempted = false;
+
+  function showTutorialStep(step) {
+    tutorialStep = step;
+    switch (step) {
+      case 'dispenser':
+        tutorialGuide.show(dispenser.leverPosition, 'UMA BOMBA ESTA PRONTA - PUXE A ALAVANCA');
+        break;
+      case 'scanner':
+        tutorialGuide.show(scanner.getSlotPosition(), 'LEVE A BOMBA ATE O SCANNER E INSIRA NO SLOT');
+        break;
+      case 'defuseApproach':
+        tutorialGuide.show(defuseTable.getModeButtonPosition(), 'COLOQUE A BOMBA NA MESA E APERTE O BOTAO');
+        break;
+      case 'wire':
+        tutorialGuide.show(
+          tutorialBomb.wireModule.group.getWorldPosition(new THREE.Vector3()),
+          'APONTE O ALICATE PRO FIO CERTO E APERTE O GATILHO'
+        );
+        break;
+      case 'button':
+        tutorialGuide.show(
+          tutorialBomb.buttonModule.group.getWorldPosition(new THREE.Vector3()),
+          'APERTE O BOTAO CERTO'
+        );
+        break;
+      case 'keypad':
+        tutorialGuide.show(
+          tutorialBomb.keypadModule.padGroup.getWorldPosition(new THREE.Vector3()),
+          'DIGITE A SENHA E CONFIRME NO OK'
+        );
+        break;
+      case 'exitMode':
+        tutorialGuide.show(defuseTable.getModeButtonPosition(), 'APERTE O BOTAO DE NOVO PRA SAIR DO MODO');
+        break;
+      case 'conveyor':
+        tutorialGuide.show(
+          conveyor.group.localToWorld(new THREE.Vector3(0, 0.6, 0)),
+          'ARREMESSE A BOMBA CONTRA O CARRINHO'
+        );
+        break;
+      case 'done':
+        tutorialGuide.hide();
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Chamado todo frame só enquanto tutorialStep é um dos 3 desafios (ver
+  // animate() abaixo) — recalcula do zero, a partir do estado real da
+  // bomba, qual é o passo "certo" agora, em vez de reagir a eventos numa
+  // ordem fixa. Isso cobre naturalmente o jogador resolvendo fora da ordem
+  // sugerida (ex.: aperta o botão antes do fio) sem lógica extra: no
+  // próximo frame o passo mostrado já reflete o que ainda falta.
+  function updateDefuseTutorialSubstep() {
+    if (!tutorialBomb) return;
+    if (tutorialBomb.keypadModule.inputBuffer.length > 0) tutorialKeypadAttempted = true;
+
+    const { wireResult, buttonResult } = tutorialBomb.results;
+    let nextStep;
+    if (wireResult === null) nextStep = 'wire';
+    else if (buttonResult === null) nextStep = 'button';
+    else if (!tutorialKeypadAttempted) nextStep = 'keypad';
+    else nextStep = 'exitMode';
+
+    if (nextStep !== tutorialStep) showTutorialStep(nextStep);
   }
 
   // Liga cast/receiveShadow em toda malha já criada acima (RoomRefactor
@@ -823,6 +951,13 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
       trashBin.update();
       conveyor.update(dt, controllerTipPositions, bombs);
       roundTimer.update(dt);
+      // Só recalcula enquanto o tutorial guiado está de fato num dos 3
+      // desafios simultâneos — fora dessa janela não há nada pra recalcular
+      // (ver updateDefuseTutorialSubstep, mais acima).
+      if (tutorialStep === 'wire' || tutorialStep === 'button' || tutorialStep === 'keypad') {
+        updateDefuseTutorialSubstep();
+      }
+      tutorialGuide.update(dt);
     }
     teleport.update();
     utilityBelt.update();
@@ -848,6 +983,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
       document.body.appendChild(VRButton.createButton(renderer));
       renderer.setAnimationLoop(animate);
       bombFlow.start();
+      showTutorialStep('dispenser');
     }
   }
 

@@ -181,7 +181,10 @@ export function createDefuseTable({
     }
 
     bomb.activateModules();
-    onModeChange?.(true);
+    // Passa `bomb` também (não só o booleano) — o tutorial guiado da
+    // primeira bomba (game.js#showTutorialStep) precisa saber SE é a bomba
+    // que está acompanhando, não só que "alguma bomba" entrou no modo.
+    onModeChange?.(true, bomb);
   }
 
   function exitMode() {
@@ -339,5 +342,8 @@ export function createDefuseTable({
     get isActive() {
       return mode;
     },
+    // Usado pelo tutorial guiado da primeira bomba (game.js#showTutorialStep)
+    // pra apontar a seta no botão de entrar/sair do modo.
+    getModeButtonPosition: () => group.localToWorld(modeButtonLocalPos.clone()),
   };
 }
