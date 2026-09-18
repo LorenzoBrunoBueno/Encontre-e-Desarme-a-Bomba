@@ -43,6 +43,7 @@ export function createConveyor({
   wallRunLength = 0.5,
   grabSystem,
   onDeliver,
+  onIncorrectDelivery,
   cartCycleSpeed = DEFAULT_CART_CYCLE_SPEED,
   cartHitRadius = DEFAULT_CART_HIT_RADIUS,
 }) {
@@ -153,8 +154,17 @@ export function createConveyor({
     bomb.delivered = true;
     scene.remove(bomb.group);
     bomb.dispose();
-    greenFlashElapsed = 0;
-    deliveryChime.play();
+    // O resultado nunca é exibido diretamente (placar continua só no
+    // relatório final, ver scoreManager.js) — mas a bomba errada agora
+    // "estoura fora da sala" (documento de especificação): som distante +
+    // tremedeira de câmera (bombExplosion.js/cameraShake.js, disparados por
+    // game.js) em vez do flash verde + chime de uma entrega bem-sucedida.
+    if (wasCorrect) {
+      greenFlashElapsed = 0;
+      deliveryChime.play();
+    } else {
+      onIncorrectDelivery?.();
+    }
     onDeliver?.(bomb.id, wasCorrect);
   }
 

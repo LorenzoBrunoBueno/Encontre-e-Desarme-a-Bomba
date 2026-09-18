@@ -33,6 +33,9 @@ import { createBombFlow } from './bombFlow.js';
 import { createScoreManager } from './scoreManager.js';
 import { createRoundTimer } from './roundTimer.js';
 import { createTensionCue, createSfxPlayer } from './audio.js';
+import { createBackgroundMusic } from './backgroundMusic.js';
+import { createBombExplosionSfx } from './bombExplosion.js';
+import { createCameraShake } from './cameraShake.js';
 import { createReportPanel } from './reportPanel.js';
 import { createTutorialGuide } from './tutorialGuide.js';
 import { getDifficultyConfig, clampPhase, MAX_PHASE } from './difficulty.js';
@@ -409,6 +412,12 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
 
   const proximityAlarm = createProximityAlarm({ listener: audioListener, grabSystem });
 
+  // Feedback de bomba entregue incorretamente (conveyor.js#completeDelivery,
+  // via onIncorrectDelivery mais abaixo): som de explosão distante + tremedeira
+  // de câmera — ver bombExplosion.js/cameraShake.js pro porquê de cada escolha.
+  const bombExplosionSfx = createBombExplosionSfx({ listener: audioListener });
+  const cameraShake = createCameraShake({ player });
+
   // SFX por estação (scan/corte/botão/teclado/queda) — um único player
   // compartilhado (ver audio.js#createSfxPlayer) passado adiante pro
   // dispenser (que repassa pra cada bomba nova) e pro scanner.
@@ -559,6 +568,10 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
         showTutorialStep('done');
       }
     },
+    onIncorrectDelivery: () => {
+      bombExplosionSfx.play();
+      cameraShake.trigger();
+    },
     cartHitRadius: difficulty.cartHitRadius,
     cartCycleSpeed: difficulty.cartCycleSpeed,
   });
@@ -634,6 +647,11 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   const reportPanel = createReportPanel(camera, controllers);
   const tutorialGuide = createTutorialGuide({ scene, camera });
   const tensionCue = createTensionCue();
+  // Ambiente contínuo de fundo (game-3d/src/assets/background) — start/stop
+  // ligados ao contrato start()/pause() do próprio game, ver mais abaixo;
+  // toca a sessão inteira, sem reiniciar entre rodadas continuadas
+  // (resetRound não toca nisso de propósito).
+  const backgroundMusic = createBackgroundMusic({ listener: audioListener });
   const roundTimer = createRoundTimer({
     onTensionStart: () => tensionCue.start(),
     onRoundEnd: () => {
@@ -960,6 +978,10 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
       tutorialGuide.update(dt);
     }
     teleport.update();
+    // Depois de teleport.update() de propósito: o shake soma seu próprio
+    // offset em cima de qualquer player.position já atualizado neste frame
+    // (ver comentário em cameraShake.js sobre o delta reversível).
+    cameraShake.update(dt);
     utilityBelt.update();
     hologram.update();
     // Fora do `if (running)`: o painel de fim de turno só fica visível
@@ -975,6 +997,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   function start() {
     if (running) return;
     running = true;
+    backgroundMusic.start();
     // hasStarted separa "primeira vez" (monta o renderer/VRButton e o loop
     // de animação) de "retomar depois de pause()" (só volta a atualizar).
     if (!hasStarted) {
@@ -989,6 +1012,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
 
   function pause() {
     running = false;
+    backgroundMusic.stop();
   }
 
   return { start, pause, on };

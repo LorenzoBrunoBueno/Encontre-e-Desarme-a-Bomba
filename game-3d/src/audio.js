@@ -26,7 +26,10 @@ export function createTensionCue() {
     oscillator.type = 'sine';
     oscillator.frequency.value = 220;
     gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+    // Era 0.15 — reduzido pra sobrar espaço pro ambiente contínuo de fundo
+    // (backgroundMusic.js), que agora toca junto durante essa mesma janela
+    // final de ~15s.
+    gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
     oscillator.connect(gain).connect(ctx.destination);
     oscillator.start();
