@@ -2,7 +2,10 @@ import * as THREE from 'three';
 
 const BELT_HEIGHT = 1.0; // altura aproximada de cintura, fixa no espaço local do player rig
 const ANCHOR_SIDE_OFFSET = 0.18;
-const ANCHOR_FORWARD_OFFSET = 0.05;
+// Deslocamento pra FRENTE do corpo (eixo -Z local do `group`, que copia só
+// o yaw da câmera — ver update() abaixo). Positivo aqui = na frente do
+// corpo, não atrás, então some com sinal negativo nos anchors abaixo.
+const ANCHOR_FORWARD_OFFSET = 0.12;
 
 // Cinto utilitário: acompanha a posição XZ e o YAW (não pitch/roll) da
 // câmera, fixando Y numa altura de cintura — o cinto "segue o corpo" (gira
@@ -19,11 +22,11 @@ export function createUtilityBelt({ player, camera }) {
   player.add(group);
 
   const leftAnchor = new THREE.Object3D();
-  leftAnchor.position.set(-ANCHOR_SIDE_OFFSET, 0, ANCHOR_FORWARD_OFFSET);
+  leftAnchor.position.set(-ANCHOR_SIDE_OFFSET, 0, -ANCHOR_FORWARD_OFFSET);
   group.add(leftAnchor);
 
   const rightAnchor = new THREE.Object3D();
-  rightAnchor.position.set(ANCHOR_SIDE_OFFSET, 0, ANCHOR_FORWARD_OFFSET);
+  rightAnchor.position.set(ANCHOR_SIDE_OFFSET, 0, -ANCHOR_FORWARD_OFFSET);
   group.add(rightAnchor);
 
   const cameraPosition = new THREE.Vector3();
