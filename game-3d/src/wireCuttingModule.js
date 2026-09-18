@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { shuffle } from './random.js';
+import { pulseHaptic } from './haptics.js';
 
 const WIRE_COUNT = 4;
 const WIRE_COLORS = [0xdd2222, 0x2255dd, 0xdddd22, 0x22aa44];
@@ -12,9 +13,19 @@ const WIRE_SPACING = 0.08;
 // alcance" de MAIS de um fio ao mesmo tempo, e o corte sempre acerta o
 // primeiro do array (era o bug do "sempre corta o azul": o threshold antigo,
 // 0.15, cobria os 4 fios de uma vez, então a mira nunca importava).
+//
+// O teste de distância roda contra a CURVA amostrada (CURVE_SAMPLES abaixo),
+// não contra o segmento reto entre as pontas — antes rodava contra o
+// segmento reto enquanto o fio era desenhado com um arco pronunciado
+// (ARC_HEIGHT), e no meio do fio (onde o jogador naturalmente tenta cortar)
+// a curva desenhada chegava a ~2 cm de distância do segmento usado no teste,
+// quase consumindo esse threshold sozinha — sobrava ~1,6 mm de margem real,
+// impossível de acertar de forma consistente em VR. Testando contra a curva
+// de verdade, o threshold inteiro volta a valer como margem de mira.
 const CUT_DISTANCE_THRESHOLD = 0.022;
 const CUT_GAP = 0.015;
 const ARC_HEIGHT = 0.06;
+const CURVE_SAMPLES = 12;
 const OUTLINE_SCALE = 1.6;
 
 function closestPointOnSegment(point, start, end) {
@@ -43,7 +54,7 @@ function makeStraightSegment(start, end, color) {
 
 // Módulo de corte de fio: interação por gatilho (handleTrigger), estilo KTANE —
 // cortar o fio errado explode a bomba na hora (onFailed), sem esperar o timer.
-export function createWireCuttingModule({ onSolved, onFailed }) {
+export function createWireCuttingModule({ onSolved, onFailed, sfx }) {
   const group = new THREE.Group();
   let resolved = false;
   const cutMeshes = [];
@@ -62,9 +73,9 @@ export function createWireCuttingModule({ onSolved, onFailed }) {
     const localEnd = new THREE.Vector3(WIRE_LENGTH / 2, y, 0);
 
     // Arqueamento (bezier quadrática) bem mais pronunciado que um "sag"
-    // sutil — o teste de corte continua usando o segmento reto localStart/
-    // localEnd acima, então o desvio é mantido bem menor que
-    // CUT_DISTANCE_THRESHOLD para não descolar visual de hit-test.
+    // sutil — o teste de corte amostra essa mesma curva (localSamples,
+    // abaixo), então o arco não precisa mais ficar raso pra "caber" dentro
+    // de CUT_DISTANCE_THRESHOLD.
     const mid = new THREE.Vector3(0, y, ARC_HEIGHT);
     const curve = new THREE.QuadraticBezierCurve3(localStart, mid, localEnd);
     const mesh = new THREE.Mesh(
@@ -97,12 +108,18 @@ export function createWireCuttingModule({ onSolved, onFailed }) {
     capEnd.position.copy(localEnd);
     group.add(capEnd);
 
+    // Amostra da própria curva (mesmos pontos que aproximam o TubeGeometry
+    // visual) — usada pelo teste de proximidade, pra mirar exatamente o que
+    // está sendo desenhado, em vez do segmento reto entre as pontas.
+    const localSamples = curve.getPoints(CURVE_SAMPLES);
+
     return {
       mesh,
       outline,
       correct: i === correctIndex,
       localStart,
       localEnd,
+      localSamples,
     };
   });
 
@@ -123,14 +140,19 @@ export function createWireCuttingModule({ onSolved, onFailed }) {
     let nearestDistance = CUT_DISTANCE_THRESHOLD;
     let nearestPoint = null;
     for (const wire of wires) {
-      const start = group.localToWorld(wire.localStart.clone());
-      const end = group.localToWorld(wire.localEnd.clone());
-      const closest = closestPointOnSegment(point, start, end);
-      const distance = closest.distanceTo(point);
-      if (distance <= nearestDistance) {
-        nearestDistance = distance;
-        nearest = wire;
-        nearestPoint = closest;
+      // Testa cada trecho reto entre amostras consecutivas da curva — uma
+      // aproximação poligonal fina da curva de verdade, bem mais fiel do
+      // que um único segmento reto entre as pontas.
+      for (let i = 0; i < wire.localSamples.length - 1; i++) {
+        const start = group.localToWorld(wire.localSamples[i].clone());
+        const end = group.localToWorld(wire.localSamples[i + 1].clone());
+        const closest = closestPointOnSegment(point, start, end);
+        const distance = closest.distanceTo(point);
+        if (distance <= nearestDistance) {
+          nearestDistance = distance;
+          nearest = wire;
+          nearestPoint = closest;
+        }
       }
     }
     return nearest ? { wire: nearest, point: nearestPoint } : null;
@@ -154,13 +176,18 @@ export function createWireCuttingModule({ onSolved, onFailed }) {
     cutMeshes.push(segA, segB);
   }
 
-  function handleTrigger(point) {
+  function handleTrigger(point, controller) {
     if (resolved || !point) return;
     const hit = findNearestWire(point);
     if (!hit) return;
     resolved = true;
     setHover(null);
     cutWireVisual(hit.wire, hit.point);
+    // Mesma intensidade pro fio certo e o errado — igual à regra já seguida
+    // pelo feedback visual (cutWireVisual não muda de cor por acerto/erro),
+    // pra não vazar o resultado, que só aparece no relatório final.
+    pulseHaptic(controller, 0.35, 40);
+    sfx?.playWireCut();
     if (hit.wire.correct) {
       onSolved();
     } else {

@@ -8,7 +8,9 @@ const BLINK_SPEED = 8;
 // Crise de superaquecimento (documento de especificação, Estação 2): a cada
 // N bombas escaneadas com sucesso, o scanner trava até o jogador purgar na
 // alavanca central (game.js cria essa alavanca e chama purgeOverheat()).
-const OVERHEAT_INTERVAL = 3;
+// Fallback caso `overheatInterval` não seja passado (ex.: testes isolados);
+// o valor "de verdade" vem de game-3d/src/difficulty.js por fase.
+const DEFAULT_OVERHEAT_INTERVAL = 3;
 
 // Scanner: o jogador só precisa ENCOSTAR a bomba no slot — a inserção sozinha
 // já dispara o scan (mecânica ativa, sem botão), com uma barra de progresso
@@ -17,7 +19,16 @@ const OVERHEAT_INTERVAL = 3;
 // (hologramDisplay.js, passado via `hologram` — complementa o panfleto, não
 // o substitui). A cada OVERHEAT_INTERVAL scans, o scanner superaquece e
 // recusa novas bombas até ser purgado.
-export function createScanner({ scene, position, rotationY = 0, grabSystem, onScanned, hologram }) {
+export function createScanner({
+  scene,
+  position,
+  rotationY = 0,
+  grabSystem,
+  onScanned,
+  hologram,
+  overheatInterval = DEFAULT_OVERHEAT_INTERVAL,
+  sfx,
+}) {
   const group = new THREE.Group();
   group.position.copy(position);
   group.rotation.y = rotationY;
@@ -147,6 +158,7 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
   function finishScan() {
     scanning = false;
     progressFill.scale.x = 0;
+    sfx?.playScanDone();
     if (currentBomb && !currentBomb.hasPamphlet) {
       const pamphlet = createPamphlet(currentBomb);
       pamphlet.group.position.set(0.18, 0.05, 0);
@@ -158,7 +170,7 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
       hologram?.showBomb(currentBomb);
 
       scansCompleted += 1;
-      if (scansCompleted % OVERHEAT_INTERVAL === 0) {
+      if (scansCompleted % overheatInterval === 0) {
         overheated = true;
       }
     }
@@ -198,5 +210,20 @@ export function createScanner({ scene, position, rotationY = 0, grabSystem, onSc
     if (bomb && !bomb.scanned) startScan(bomb);
   }
 
-  return { group, update, purgeOverheat };
+  // Reinicia o scanner pra uma nova rodada em memória (game.js#resetRound,
+  // loop contínuo entre fases — ver game-3d/instrucao.md): sem isso,
+  // `currentBomb` continuaria apontando pra uma bomba já descartada
+  // (dispose()) da rodada anterior se o timer zerasse no meio de um scan.
+  function reset() {
+    scanning = false;
+    currentBomb = null;
+    progressFill.scale.x = 0;
+    scansCompleted = 0;
+    overheated = false;
+    overheatLight.material.emissiveIntensity = 0;
+    blinkPhase = 0;
+    statusPanel.setText('PRONTO', '#33ff66', '#111111');
+  }
+
+  return { group, update, purgeOverheat, reset };
 }

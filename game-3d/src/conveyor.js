@@ -8,9 +8,15 @@ const BELT_SPEED = 0.4;
 // parede; agora anda EM DIREÇÃO a ela, pra terminar num vão de saída de
 // verdade, não num beco sem saída lateral).
 const CART_RANGE = 0.32;
-const CART_CYCLE_SPEED = 0.5; // ciclos por segundo do vaivém
-const CART_HIT_RADIUS = 0.18;
-const DUCT_RADIUS = 0.22;
+// Fallbacks caso `cartCycleSpeed`/`cartHitRadius` não sejam passados (ex.:
+// testes isolados) — os valores "de verdade" vêm de
+// game-3d/src/difficulty.js por fase. Achado do playtest via IWER: com os
+// números que existiam aqui antes (0.5 Hz / 0.18), a janela de acerto real
+// (~38% do tempo mirando o centro do trilho) não converteu em nenhuma
+// tentativa em 5 tentativas com mira calculada matematicamente — a fase 1
+// usa valores mais generosos que estes por causa disso (ver difficulty.js).
+const DEFAULT_CART_CYCLE_SPEED = 0.5; // ciclos por segundo do vaivém
+const DEFAULT_CART_HIT_RADIUS = 0.18;
 // Trajeto até o vão de saída (RoomRefactor item 3) — ao acertar o carrinho,
 // a bomba já não desaparece na hora: continua em linha reta até cruzar a
 // cortina de tiras PVC bem perto da parede de trás, só aí conta como
@@ -27,14 +33,19 @@ const GREEN_FLASH_DURATION = 0.5;
 // nesse momento — só entra no relatório final (scoreManager.js e
 // game.on('roundEnd', ...)).
 //
-// Também abriga o duto de descarte do núcleo/bateria retirado na etapa
-// traseira da bancada (rearPanelModule.js/defuseTable.js) — aceita tanto
-// arremesso (mesmo mecanismo do carrinho) quanto simplesmente colocar por
-// perto (watchCore, chamado por game.js quando um núcleo é exposto).
-// Descartar o núcleo não afeta pontuação — o documento não liga isso a
-// pontos, é só tarefa física extra (suposição documentada, igual à etapa
-// traseira em si).
-export function createConveyor({ scene, position, rotationY = 0, wallRunLength = 0.5, grabSystem, onDeliver }) {
+// O duto de descarte do núcleo/bateria (etapa traseira da bancada) morava
+// aqui antes — migrado pra trashBin.js, uma estação própria ao lado da mesa
+// de desarme, pra esta esteira ficar só com a entrega de bombas.
+export function createConveyor({
+  scene,
+  position,
+  rotationY = 0,
+  wallRunLength = 0.5,
+  grabSystem,
+  onDeliver,
+  cartCycleSpeed = DEFAULT_CART_CYCLE_SPEED,
+  cartHitRadius = DEFAULT_CART_HIT_RADIUS,
+}) {
   const group = new THREE.Group();
   group.position.copy(position);
   group.rotation.y = rotationY;
@@ -117,36 +128,14 @@ export function createConveyor({ scene, position, rotationY = 0, wallRunLength =
   let greenFlashElapsed = GREEN_FLASH_DURATION;
   const deliveryChime = createDeliveryChime();
 
-  // Duto de descarte do núcleo/bateria retirado na etapa traseira da
-  // bancada — aceita arremesso (registerThrowTarget) e colocar por perto
-  // (watchedCores, checado por proximidade em update). Fica de lado, perto
-  // da frente da estação — fora do trajeto do carrinho, que agora corre em Z.
-  const duct = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.18, 0.28, 16),
-    new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6, metalness: 0.3 })
-  );
-  duct.position.set(0.35, 0.14, 0.35);
-  group.add(duct);
-
-  // `latestBombs` guarda a referência mais recente pra que os callbacks de
-  // registerThrowTarget (disparados de dentro de grabSystem.update, DEPOIS
+  // `latestBombs` guarda a referência mais recente pra que o callback de
+  // registerThrowTarget (disparado de dentro de grabSystem.update, DEPOIS
   // de conveyor.update no mesmo frame — ver ordem em game.js#animate)
-  // consigam mapear o object3D arremessado de volta pra uma bomba.
+  // consiga mapear o object3D arremessado de volta pra uma bomba.
   let latestBombs = [];
-  const watchedCores = [];
   // Bombas em trânsito entre o hit no carrinho e o cruzamento da cortina —
   // ver beginDelivery/completeDelivery.
   const traveling = [];
-
-  function watchCore(coreObject) {
-    watchedCores.push(coreObject);
-  }
-
-  function ductWorldPosition() {
-    const p = new THREE.Vector3();
-    duct.getWorldPosition(p);
-    return p;
-  }
 
   // Ao acertar o carrinho, a bomba NÃO é entregue ainda — só sai do grab
   // system (não pode mais ser pega no meio do trajeto) e começa a viajar até
@@ -169,30 +158,19 @@ export function createConveyor({ scene, position, rotationY = 0, wallRunLength =
     onDeliver?.(bomb.id, wasCorrect);
   }
 
-  function discardCore(coreObject) {
-    grabSystem.unregister(coreObject);
-    scene.remove(coreObject);
-    const index = watchedCores.indexOf(coreObject);
-    if (index !== -1) watchedCores.splice(index, 1);
-  }
-
-  grabSystem.registerThrowTarget(cart, CART_HIT_RADIUS, (object3D) => {
+  // Guarda a referência do alvo (não só registra) — cartHitRadius muda por
+  // fase (difficulty.js); reset() abaixo atualiza o raio direto neste
+  // registro em vez de desregistrar/registrar de novo a cada rodada.
+  const cartThrowTarget = grabSystem.registerThrowTarget(cart, cartHitRadius, (object3D) => {
     const bomb = latestBombs.find((b) => b.group === object3D);
     if (bomb) beginDelivery(bomb);
-  });
-
-  grabSystem.registerThrowTarget(duct, DUCT_RADIUS, (object3D) => {
-    // O duto não aceita bombas, só o núcleo/bateria — ignora qualquer outro
-    // objeto arremessado que caia por perto por acidente.
-    if (latestBombs.some((b) => b.group === object3D)) return;
-    if (watchedCores.includes(object3D)) discardCore(object3D);
   });
 
   function update(dt, tipPositions, bombs) {
     latestBombs = bombs;
     beltTexture.offset.y -= dt * BELT_SPEED;
 
-    cartPhase += dt * CART_CYCLE_SPEED;
+    cartPhase += dt * cartCycleSpeed;
     cart.position.z = Math.sin(cartPhase * Math.PI * 2) * CART_RANGE;
 
     for (let i = traveling.length - 1; i >= 0; i--) {
@@ -211,18 +189,25 @@ export function createConveyor({ scene, position, rotationY = 0, wallRunLength =
       const t = THREE.MathUtils.clamp(greenFlashElapsed / GREEN_FLASH_DURATION, 0, 1);
       exitLight.intensity = (1 - t) * 2;
     }
+  }
 
-    // Descarte do núcleo por proximidade (sem precisar arremessar) — só
-    // considera núcleos soltos, não os que ainda estão na mão.
-    const ductPos = ductWorldPosition();
-    for (let i = watchedCores.length - 1; i >= 0; i--) {
-      const core = watchedCores[i];
-      if (grabSystem.isHeld(core)) continue;
-      const corePos = new THREE.Vector3();
-      core.getWorldPosition(corePos);
-      if (corePos.distanceTo(ductPos) <= DUCT_RADIUS) discardCore(core);
+  // Reinicia a esteira pra uma nova rodada em memória (game.js#resetRound,
+  // loop contínuo entre fases — ver game-3d/instrucao.md): `traveling` da
+  // rodada anterior referenciaria bombas já descartadas; `cartHitRadius`/
+  // `cartCycleSpeed` mudam por fase, atualizados aqui em vez de recriar a
+  // esteira inteira (que também recriaria a geometria estática sem
+  // necessidade).
+  function reset({ cartHitRadius: newRadius, cartCycleSpeed: newSpeed } = {}) {
+    traveling.length = 0;
+    cartPhase = 0;
+    cart.position.z = 0;
+    greenFlashElapsed = GREEN_FLASH_DURATION;
+    if (newSpeed !== undefined) cartCycleSpeed = newSpeed;
+    if (newRadius !== undefined) {
+      cartHitRadius = newRadius;
+      cartThrowTarget.radius = newRadius;
     }
   }
 
-  return { group, update, watchCore };
+  return { group, update, reset };
 }

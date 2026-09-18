@@ -39,6 +39,24 @@ const DISPENSER_WALL_INSET = 0.55;
 const SCANNER_WALL_INSET = 0.55;
 const DEFUSE_TABLE_WALL_INSET = 0.75;
 const CONVEYOR_WALL_INSET = 0.5;
+// Alavanca de purga do superaquecimento do scanner — não é uma "estação"
+// como as outras (não tem estrutura própria/painéis, é só a alavanca +
+// placa de fixação, ver game.js), mas ganhou uma entrada aqui do mesmo
+// jeito pra não duplicar a posição entre este arquivo (teleporte) e
+// game.js (a alavanca em si).
+//
+// Achado do playtest (2026-09-18): montada no CENTRO da sala (posição
+// antiga, (0.35, 0, 0)), a alavanca ficava baixa demais (nível do chão) e
+// longe de qualquer parede — difícil de alcançar. Pedido do usuário: mover
+// pra parede oeste, à direita da esteira do ponto de vista de quem está de
+// frente pra ela (conveyor.rotationY aponta pra +X — "direita" nessa
+// orientação é -Z, mesma fórmula `right = forward × up` já usada pra
+// posicionar a lixeira ao lado da mesa, ver game-3d/instrucao.md seção 9).
+// `wallInset` aqui é maior que o das outras estações de propósito: a
+// alavanca fica bem PERTO da parede (montada nela), não no meio do
+// caminho como dispenser/scanner/mesa/esteira.
+const PURGE_LEVER_WALL_INSET = 0.2;
+const PURGE_LEVER_Z_OFFSET = -1.3; // deslocamento a partir da esteira, na mesma parede
 
 export function createRoomLayout() {
   const stations = {
@@ -68,16 +86,25 @@ export function createRoomLayout() {
       // o vão de saída/cortina PVC (item 3) exatamente na parede.
       wallRunLength: CONVEYOR_WALL_INSET,
     },
+    purgeLever: {
+      position: new THREE.Vector3(
+        -(ROOM_HALF_X - PURGE_LEVER_WALL_INSET),
+        0,
+        PURGE_LEVER_Z_OFFSET
+      ),
+      rotationY: WALL_ROTATIONS.west,
+      wall: 'west',
+    },
   };
 
   // Um único ponto de teleporte cobre dispenser+scanner (mesma parede,
-  // lado a lado) — o resto continua 1 ponto por estação + 1 central, igual
-  // ao layout anterior.
+  // lado a lado) — o resto continua 1 ponto por estação (a alavanca de
+  // purga inclusa, desde que ela ganhou uma posição de parede de verdade).
   const teleportPoints = [
     { x: 0, z: stations.dispenser.position.z + 0.75 }, // preparo: dispenser + scanner
     { x: stations.defuseTable.position.x - 1.0, z: 0 }, // mesa de desarme
     { x: stations.conveyor.position.x + 1.0, z: 0 }, // esteira
-    { x: 0, z: 0 }, // centro (alavanca de purga do scanner)
+    { x: stations.purgeLever.position.x + 1.0, z: stations.purgeLever.position.z }, // alavanca de purga
   ];
 
   return { stations, teleportPoints, roomHalfX: ROOM_HALF_X, roomHalfZ: ROOM_HALF_Z, wallRotations: WALL_ROTATIONS };

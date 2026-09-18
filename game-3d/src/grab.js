@@ -43,14 +43,24 @@ const THROW_LAND_RADIUS = 0.05; // "raio" aproximado do objeto para pousar no ch
 // linguagem visual do raio do teleporte) que acende quando há algo pegável
 // ao alcance, já que não existe um raio para dar esse feedback aqui.
 //
-// register(object3D, { grabRotation, throwable }) aceita um THREE.Quaternion
-// opcional (grabRotation): se presente, o objeto sempre assume essa rotação
-// (local, relativa à mão) ao ser pego, em vez de manter a rotação em que
-// estava — usado pelo alicate para sempre "nascer" com a lâmina apontando
-// pra frente da mão, não importa o ângulo em que foi pego. `throwable`
-// (default false) habilita o objeto a herdar velocidade do controller ao
-// ser solto (ver seção de arremesso abaixo) — bombas usam isso, ferramentas
-// do cinto não precisam.
+// register(object3D, { grabRotation, throwable, homeAnchor, homePosition,
+// homeQuaternion }) aceita um THREE.Quaternion opcional (grabRotation): se
+// presente, o objeto sempre assume essa rotação (local, relativa à mão) ao
+// ser pego, em vez de manter a rotação em que estava — usado pelo alicate
+// para sempre "nascer" com a lâmina apontando pra frente da mão, não importa
+// o ângulo em que foi pego. `throwable` (default false) habilita o objeto a
+// herdar velocidade do controller ao ser solto (ver seção de arremesso
+// abaixo) — bombas usam isso.
+//
+// `homeAnchor` (opcional, um Object3D): se presente, o objeto NUNCA fica
+// "flutuando" onde a mão soltou — ao soltar o grip, ele é reparentado direto
+// pra esse anchor e sua posição/rotação local é forçada para
+// `homePosition`/`homeQuaternion` (default: origem/identidade), ignorando
+// throwable/velocidade. Usado pelas ferramentas do cinto (alicate/chave de
+// fenda, ver game.js): sem isso, soltar o grip fora do cinto deixava a
+// ferramenta parada no ar pra sempre (scene.attach preserva a posição
+// mundial, e elas não são throwable, então nunca caem/pousam em lugar
+// nenhum).
 //
 // isLocked() (opcional) reflete o mesmo travamento de locomoção do modo de
 // desarme (teleport.lock()) — force pull fica desativado nesse estado, já
@@ -100,8 +110,11 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
     return line;
   });
 
-  function register(object3D, { grabRotation = null, throwable = false } = {}) {
-    grabbables.push({ object3D, grabRotation, throwable });
+  function register(
+    object3D,
+    { grabRotation = null, throwable = false, homeAnchor = null, homePosition = null, homeQuaternion = null } = {}
+  ) {
+    grabbables.push({ object3D, grabRotation, throwable, homeAnchor, homePosition, homeQuaternion });
   }
 
   function unregister(object3D) {
@@ -199,7 +212,13 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
     if (heldByController.has(controller)) return;
     controller.attach(descriptor.object3D);
     if (descriptor.grabRotation) descriptor.object3D.quaternion.copy(descriptor.grabRotation);
-    heldByController.set(controller, { object3D: descriptor.object3D, throwable: descriptor.throwable });
+    heldByController.set(controller, {
+      object3D: descriptor.object3D,
+      throwable: descriptor.throwable,
+      homeAnchor: descriptor.homeAnchor,
+      homePosition: descriptor.homePosition,
+      homeQuaternion: descriptor.homeQuaternion,
+    });
   }
 
   controllers.forEach((controller) => {
@@ -214,8 +233,18 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
     controller.addEventListener('squeezeend', () => {
       const held = heldByController.get(controller);
       if (!held) return;
-      scene.attach(held.object3D);
       heldByController.delete(controller);
+
+      // Ferramentas do cinto: voltam direto pro anchor, ignorando
+      // throwable/velocidade — nunca ficam soltas em voo ou paradas no ar.
+      if (held.homeAnchor) {
+        held.homeAnchor.add(held.object3D);
+        held.object3D.position.copy(held.homePosition ?? new THREE.Vector3());
+        held.object3D.quaternion.copy(held.homeQuaternion ?? new THREE.Quaternion());
+        return;
+      }
+
+      scene.attach(held.object3D);
 
       const velocity = controllerVelocities.get(controller);
       if (held.throwable && velocity && velocity.length() > 0.5) {
@@ -253,6 +282,9 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
       elapsed: 0,
       grabRotation: entry.grabRotation,
       throwable: entry.throwable,
+      homeAnchor: entry.homeAnchor,
+      homePosition: entry.homePosition,
+      homeQuaternion: entry.homeQuaternion,
     });
   }
 
@@ -309,8 +341,39 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
     });
   }
 
+  // Retorna o próprio registro (não só void) — conveyor.js guarda essa
+  // referência pra poder mudar `radius` depois (cartHitRadius muda por fase,
+  // ver game.js#resetRound), sem precisar desregistrar/registrar de novo.
   function registerThrowTarget(mesh, radius, onHit) {
-    throwTargets.push({ mesh, radius, onHit });
+    const target = { mesh, radius, onHit };
+    throwTargets.push(target);
+    return target;
+  }
+
+  // Solta imediatamente tudo que estiver na mão de algum controller, sem
+  // física de arremesso — usado só ao reiniciar a rodada em memória (game.js
+  // #resetRound, ver game-3d/instrucao.md) pra garantir que nenhuma bomba
+  // fique "presa" à mão do jogador entre uma rodada e a próxima. Ferramentas
+  // do cinto (homeAnchor) voltam pro anchor, igual ao squeezeend normal;
+  // qualquer outra coisa segurada só reparenta pra scene, sem herdar
+  // velocidade (diferente do squeezeend, que joga na física de arremesso).
+  // Também cancela puxões/arremessos em andamento — casos raros (só
+  // acontecem se o timer da rodada zerar no exato frame de um gesto em
+  // curso), aceitável simplesmente congelar no lugar.
+  function releaseAll() {
+    heldByController.forEach((held) => {
+      if (held.homeAnchor) {
+        held.homeAnchor.add(held.object3D);
+        held.object3D.position.copy(held.homePosition ?? new THREE.Vector3());
+        held.object3D.quaternion.copy(held.homeQuaternion ?? new THREE.Quaternion());
+      } else {
+        scene.attach(held.object3D);
+      }
+    });
+    heldByController.clear();
+    pullStates.clear();
+    flyingPulls.length = 0;
+    thrownObjects.length = 0;
   }
 
   // Física simples de projétil (gravidade + integração linear) para objetos
@@ -371,5 +434,5 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
     updateThrownObjects(dt);
   }
 
-  return { register, unregister, isHeld, update, registerThrowTarget, getHoldingController };
+  return { register, unregister, isHeld, update, registerThrowTarget, getHoldingController, releaseAll };
 }

@@ -1,8 +1,13 @@
-import { API_BASE } from './config.js';
+// Cliente HTTP mínimo — só as duas chamadas que o loop contínuo entre fases
+// precisa fazer sem sair da sessão WebXR (POST /api/scores,
+// GET/PATCH /api/progress), usado por main.js#roundContinue (ver
+// game-3d/instrucao.md). Duplicado de propósito de frontend/js/api.js: os
+// dois bundlers não compartilham módulo (mesma decisão já documentada em
+// difficulty.js sobre MAX_PHASE), e aqui só uma fração do client completo é
+// necessária — nenhuma tela deste projeto (login/leaderboard/settings) vive
+// dentro da sessão WebXR.
+const API_BASE = '/api';
 
-// Cliente da API — contrato completo em CLAUDE.md ("Contrato de API com o
-// Backend") e api/instrucao.md. Todo request é relativo a /api: mesmo
-// domínio do frontend em produção (Azure Static Web Apps), sem CORS.
 async function request(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
@@ -16,16 +21,9 @@ async function request(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-export const api = {
-  register: (name, pin) =>
-    request('/settings/register', { method: 'POST', body: { name, pin } }),
-  login: (name, pin) => request('/settings/login', { method: 'POST', body: { name, pin } }),
-  getSettings: (playerId) => request(`/settings/${playerId}`),
-  patchSettings: (playerId, patch) =>
-    request(`/settings/${playerId}`, { method: 'PATCH', body: patch }),
+export const apiClient = {
   postScore: (playerId, score, deathsCaused) =>
     request('/scores', { method: 'POST', body: { playerId, score, deathsCaused } }),
-  getLeaderboard: () => request('/leaderboard'),
   getProgress: (playerId) => request(`/progress/${playerId}`),
   patchProgress: (playerId, patch) =>
     request(`/progress/${playerId}`, { method: 'PATCH', body: patch }),

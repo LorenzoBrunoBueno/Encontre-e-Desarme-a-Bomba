@@ -88,7 +88,7 @@ function buildRoundedBody(color) {
 // depois que a bomba entra no modo de desarme na mesa (activateModules).
 // O resultado de cada desafio (true/false/null) só é usado para calcular a
 // pontuação no relatório final; nada é exibido ao jogador durante a partida.
-export function createBomb() {
+export function createBomb({ wireButtonTouchThreshold, keypadTouchThreshold, sfx } = {}) {
   const id = nextBombId++;
   const variant = randomInt(0, BODY_COLORS.length - 1);
 
@@ -154,6 +154,7 @@ export function createBomb() {
     onFailed: () => {
       wireResult = false;
     },
+    sfx,
   });
 
   const buttonModule = createButtonChoiceModule({
@@ -161,12 +162,16 @@ export function createBomb() {
     onResult: (correct) => {
       buttonResult = correct;
     },
+    touchThreshold: wireButtonTouchThreshold,
+    sfx,
   });
 
   const keypadModule = createKeypadModule({
     onSolved: () => {
       codeResult = true;
     },
+    touchThreshold: keypadTouchThreshold,
+    sfx,
   });
 
   // `modules`: as 3 peças LÓGICAS (fio, botão, senha) — cada uma com seu
@@ -255,17 +260,21 @@ export function createBomb() {
     led.material.emissiveIntensity = 0;
   }
 
-  function update(dt, tipPositions, cutterTip, screwdriverTip, screwdriverQuaternion) {
+  function update(dt, tipPositions, cutterTip, screwdriverTip, screwdriverQuaternion, screwdriverController) {
     if (!active) return;
     ledPhase += dt * 6;
     led.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(ledPhase);
     modules.forEach((mod) => mod.update(dt, tipPositions, cutterTip));
-    rearPanelModule.update(dt, screwdriverTip, screwdriverQuaternion);
+    rearPanelModule.update(dt, screwdriverTip, screwdriverQuaternion, screwdriverController);
   }
 
-  function handleTrigger(point) {
+  function handleTrigger(point, controller) {
     if (!active) return;
-    modules.forEach((mod) => mod.handleTrigger(point));
+    modules.forEach((mod) => mod.handleTrigger(point, controller));
+    // Atalho por gatilho pra girar o parafuso destacado (ver
+    // rearPanelModule.js#handleTrigger) — soma ao gesto de girar o pulso,
+    // não substitui.
+    rearPanelModule.handleTrigger();
   }
 
   function markScanned() {

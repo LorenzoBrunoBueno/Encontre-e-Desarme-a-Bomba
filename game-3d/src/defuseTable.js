@@ -6,6 +6,15 @@ const TABLE_TOP_LOCAL_Y = 0.78;
 const SNAP_DURATION = 0.18;
 const SNAP_SCALE = 1.15;
 const ROTATE_DURATION = 0.4;
+// Mesma técnica de "inverted hull" do fio/botão/parafuso (wireCuttingModule.js/
+// buttonChoiceModule.js/rearPanelModule.js): casca branca por dentro
+// (BackSide), só visível enquanto a ponta do controller estiver perto do
+// botão. Os dois botões da mesa (modo/rotação) eram acionados só por
+// proximidade (encostar já disparava a ação) — mudado pra "proximidade
+// destaca, gatilho confirma", igual a todo o resto do jogo: mais fácil de
+// testar com mouse (que não empurra um objeto contra outro de forma
+// confiável) e dá um indicador visual que antes não existia.
+const OUTLINE_SCALE = 1.6;
 
 // Mesa de desarme: o jogador coloca a bomba no slot e toca no botão para
 // entrar no "modo de desarme" — locomoção travada (teleport.lock()), bomba
@@ -89,6 +98,13 @@ export function createDefuseTable({
   group.add(modeButtonMesh);
   const modeButtonLocalPos = modeButtonMesh.position.clone();
 
+  const modeButtonOutline = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.045 * OUTLINE_SCALE, 0.045 * OUTLINE_SCALE, 0.02, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide })
+  );
+  modeButtonOutline.visible = false;
+  modeButtonMesh.add(modeButtonOutline);
+
   // Botão de rotação — ocupa o ponto onde o alicate ficava fixo antes da
   // Fase A3 (cinto utilitário), já livre nesse canto da mesa.
   const rotateButtonBase = new THREE.Mesh(
@@ -106,10 +122,23 @@ export function createDefuseTable({
   group.add(rotateButtonMesh);
   const rotateButtonLocalPos = rotateButtonMesh.position.clone();
 
+  const rotateButtonOutline = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04 * OUTLINE_SCALE, 0.04 * OUTLINE_SCALE, 0.018, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide })
+  );
+  rotateButtonOutline.visible = false;
+  rotateButtonMesh.add(rotateButtonOutline);
+
   let mode = false;
   let currentBomb = null;
-  let touchingButton = false;
-  let touchingRotateButton = false;
+  // Hover (proximidade) dos dois botões — a ação de verdade só dispara no
+  // gatilho (handleTrigger), lendo o estado mais recente destas flags.
+  let hoveringModeButton = false;
+  let hoveringRotateButton = false;
+  // Bomba encostada no slot, recalculada a cada frame só quando fora do
+  // modo — cacheada aqui porque handleTrigger (chamado por um evento de
+  // controller, não por update) não recebe `bombs`.
+  let bombOnTable = null;
   let snapAnim = null; // { elapsed }
   let rotationAnim = null; // { fromX, toX, elapsed }
 
@@ -159,8 +188,22 @@ export function createDefuseTable({
     mode = false;
     if (currentBomb) {
       currentBomb.deactivateModules();
+      // Tirar a bomba da mesa é a única forma de perder o progresso dos
+      // parafusos da etapa traseira (ver rearPanelModule.js#resetProgress) —
+      // perder o alcance da chave de fenda enquanto a bomba ainda está na
+      // mesa não reseta mais nada.
+      currentBomb.rearPanelModule.resetProgress();
       currentBomb.group.scale.setScalar(1);
-      grabSystem.register(currentBomb.group);
+      // BUG achado no playtest via IWER (repetível em toda partida real, não
+      // só no teste): enterMode() chama grabSystem.unregister(bomb.group)
+      // (linha ~137) e essa chamada aqui re-registrava SEM `{ throwable:
+      // true }`, perdendo a flag que dispenser.js dava à bomba ao pousar na
+      // caixa de coleta (game.js#onBombLanded). Resultado: nenhuma bomba
+      // conseguia ser arremessada na esteira depois de passar pela mesa de
+      // desarme — ou seja, NUNCA, já que toda bomba passa por aqui. Isso
+      // explica (pelo menos em parte) o "0 acertos em várias tentativas" dos
+      // playtests anteriores, não só o raio/velocidade do carrinho.
+      grabSystem.register(currentBomb.group, { throwable: true });
     }
     currentBomb = null;
     snapAnim = null;
@@ -206,7 +249,7 @@ export function createDefuseTable({
         screwdriverQuaternion = screwdriverController.getWorldQuaternion(new THREE.Quaternion());
       }
 
-      currentBomb.update(dt, tipPositions, cutterTip, screwdriverTip, screwdriverQuaternion);
+      currentBomb.update(dt, tipPositions, cutterTip, screwdriverTip, screwdriverQuaternion, screwdriverController);
 
       if (currentBomb.rearPanelModule.coverOpen && !currentBomb.coreExposed) {
         currentBomb.markCoreExposed();
@@ -231,38 +274,68 @@ export function createDefuseTable({
       if (t >= 1) rotationAnim = null;
     }
 
-    const touching = isTouchingModeButton(tipPositions);
-    if (touching && !touchingButton) {
-      if (mode) {
-        exitMode();
-      } else {
-        const bomb = findBombOnTable(bombs);
-        if (bomb) enterMode(bomb);
-      }
+    // Só recalcula a bomba encostada no slot fora do modo — é o único
+    // momento em que o botão de modo precisa dela (pra entrar), e evita
+    // custo (bombs.find) todo frame enquanto já se está desarmando.
+    if (!mode) bombOnTable = findBombOnTable(bombs);
+
+    const touchingMode = isTouchingModeButton(tipPositions);
+    if (touchingMode !== hoveringModeButton) {
+      hoveringModeButton = touchingMode;
+      modeButtonOutline.visible = touchingMode;
     }
-    touchingButton = touching;
 
     const touchingRotate = isTouchingRotateButton(tipPositions);
-    if (touchingRotate && !touchingRotateButton && mode && currentBomb && !rotationAnim) {
-      rotationAnim = { fromX: currentBomb.group.rotation.x, toX: currentBomb.group.rotation.x + Math.PI, elapsed: 0 };
+    if (touchingRotate !== hoveringRotateButton) {
+      hoveringRotateButton = touchingRotate;
+      rotateButtonOutline.visible = touchingRotate;
     }
-    touchingRotateButton = touchingRotate;
   }
 
-  function handleTrigger() {
+  function handleTrigger(controller) {
+    // Botões da mesa: proximidade só destaca (ver update() acima), o
+    // gatilho confirma — igual ao fio/botão/teclado/parafuso, mais fácil de
+    // testar com mouse (que não empurra um objeto contra outro de forma
+    // confiável).
+    if (hoveringModeButton) {
+      if (mode) {
+        exitMode();
+      } else if (bombOnTable) {
+        enterMode(bombOnTable);
+      }
+      return;
+    }
+
+    if (hoveringRotateButton) {
+      if (mode && currentBomb && !rotationAnim) {
+        rotationAnim = { fromX: currentBomb.group.rotation.x, toX: currentBomb.group.rotation.x + Math.PI, elapsed: 0 };
+      }
+      return;
+    }
+
     if (!mode || !currentBomb) return;
     // Só o corte de fio precisa da ponta do alicate (e só existe se ele
     // estiver na mão); botão colorido e teclado ignoram esse ponto — eles
     // confirmam o que já estava destacado por proximidade (ver update()
     // de cada módulo), então funcionam mesmo sem o alicate na mão.
     const point = grabSystem.isHeld(pincers.group) ? pincers.getTipPosition() : null;
-    currentBomb.handleTrigger(point);
+    // `controller` só serve pra haptics (pulseHaptic em cada módulo, ver
+    // wireCuttingModule.js/buttonChoiceModule.js/keypadModule.js) — a lógica
+    // de qual fio/botão/tecla foi acionado nunca depende de qual mão apertou
+    // o gatilho.
+    currentBomb.handleTrigger(point, controller);
   }
 
   return {
     group,
     update,
     handleTrigger,
+    // Exposto pra game.js#resetRound poder forçar a saída do modo de
+    // desarme (loop contínuo entre fases — ver game-3d/instrucao.md) se o
+    // timer da rodada zerar com uma bomba ainda ativa na mesa — mesmo
+    // caminho que o botão físico já usa, então já cuida de destravar o
+    // teleporte e reverter o registro no grab system.
+    exitMode,
     get isActive() {
       return mode;
     },

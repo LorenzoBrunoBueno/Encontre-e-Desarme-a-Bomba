@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { createBomb, BOMB_FUSE_SECONDS } from './bomb.js';
+// (BOMB_FUSE_SECONDS segue como fallback de dropBomb() abaixo — o valor
+// "de verdade" agora vem de game-3d/src/difficulty.js via `fuseSeconds`.)
 import { createStripeTexture } from './stripeTexture.js';
 import { createLeverSwitch } from './leverSwitch.js';
 import { CEILING_HEIGHT, ROOM_CEILING_Y } from './roomLayout.js';
@@ -45,6 +47,10 @@ export function createDispenser({
   grabSystem,
   onBombLanded,
   onLeverPulled,
+  fuseSeconds = BOMB_FUSE_SECONDS,
+  wireButtonTouchThreshold,
+  keypadTouchThreshold,
+  sfx,
 }) {
   const group = new THREE.Group();
   group.position.set(position.x, CEILING_HEIGHT, position.z);
@@ -208,10 +214,10 @@ export function createDispenser({
   }
 
   function dropBomb() {
-    const bomb = createBomb();
+    const bomb = createBomb({ wireButtonTouchThreshold, keypadTouchThreshold, sfx });
     // Fusível começa a correr assim que a bomba sai do dispenser (documento
     // de especificação, Estação 1) — não quando ela pousa na caixa.
-    bomb.startTimer(BOMB_FUSE_SECONDS);
+    bomb.startTimer(fuseSeconds);
     const from = new THREE.Vector3(position.x, CHUTE_EXIT_HEIGHT, position.z);
     bomb.group.position.copy(from);
     bomb.group.rotation.y = (Math.random() * 2 - 1) * STACK_JITTER_ROT;
@@ -258,6 +264,7 @@ export function createDispenser({
       drop.bomb.group.position.lerpVectors(ab, bc, t);
       if (t >= 1) {
         falling.splice(i, 1);
+        sfx?.playBombLand();
         onBombLanded(drop.bomb);
       }
     }
@@ -270,5 +277,28 @@ export function createDispenser({
     }
   }
 
-  return { group, dropBomb, update, setArmed };
+  // Reinicia o dispenser pra uma nova rodada em memória (game.js
+  // #resetRound, loop contínuo entre fases — ver game-3d/instrucao.md): sem
+  // isso, bombas da rodada anterior ainda "caindo" (`falling`) ou
+  // "descansando" na caixa (`restingBombs`) ficariam referenciando grupos já
+  // descartados (dispose()), e a alavanca manteria progresso de puxão de
+  // outra rodada.
+  function reset() {
+    falling.length = 0;
+    restingBombs.length = 0;
+    setArmed(false);
+    lever.reset();
+  }
+
+  // `wireButtonTouchThreshold`/`keypadTouchThreshold` mudam por fase
+  // (difficulty.js) — como são só parâmetros de função (bindings locais
+  // mutáveis, não const), reatribuir aqui já é suficiente pra dropBomb()
+  // (chamada bem depois, em tempo de jogo) passar os valores novos pras
+  // bombas seguintes, sem precisar recriar o dispenser inteiro.
+  function setDifficulty({ wireButtonTouchThreshold: newWire, keypadTouchThreshold: newKeypad } = {}) {
+    if (newWire !== undefined) wireButtonTouchThreshold = newWire;
+    if (newKeypad !== undefined) keypadTouchThreshold = newKeypad;
+  }
+
+  return { group, dropBomb, update, setArmed, reset, setDifficulty };
 }

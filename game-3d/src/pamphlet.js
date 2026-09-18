@@ -6,7 +6,10 @@ import { colorName } from './colorNames.js';
 // do fio certo e cor do botão certo. Texto grande — vai ser lido segurando
 // na mão dentro da sessão VR (CLAUDE.md exige texto legível em VR).
 export function createPamphlet(bomb) {
-  const panel = createTextPanel({ width: 0.22, height: 0.3, fontSize: 26 });
+  // 'paper': mantém a leitura de "folha impressa" (CLAUDE.md pede texto
+  // grande e legível na mão) — não faz sentido o panfleto virar um cartão
+  // de vidro/glow como o resto da sala (ver textPanel.js).
+  const panel = createTextPanel({ width: 0.22, height: 0.3, fontSize: 26, style: 'paper' });
   panel.setText(
     [
       `SENHA`,

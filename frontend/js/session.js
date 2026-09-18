@@ -5,6 +5,11 @@
 // pastas, por isso o nome da chave não pode mudar sem atualizar as duas.
 const PLAYER_ID_KEY = 'defuse:playerId';
 const PLAYER_NAME_KEY = 'defuse:playerName';
+// Fase de dificuldade persistente (currentPhase da API, GET /api/progress) —
+// game-3d/src/main.js lê essa mesma chave "defuse:currentPhase" pra decidir
+// com que dificuldade a cena nasce. Guardada aqui (não em cada chamador)
+// pelo mesmo motivo do playerId: um único lugar dono do nome da chave.
+const CURRENT_PHASE_KEY = 'defuse:currentPhase';
 
 export function getSession() {
   const playerId = localStorage.getItem(PLAYER_ID_KEY);
@@ -20,4 +25,9 @@ export function setSession(playerId, name) {
 export function clearSession() {
   localStorage.removeItem(PLAYER_ID_KEY);
   localStorage.removeItem(PLAYER_NAME_KEY);
+  localStorage.removeItem(CURRENT_PHASE_KEY);
+}
+
+export function cacheCurrentPhase(phase) {
+  localStorage.setItem(CURRENT_PHASE_KEY, String(phase));
 }

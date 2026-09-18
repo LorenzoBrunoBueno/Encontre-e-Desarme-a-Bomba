@@ -88,6 +88,15 @@
   padding-left: 4px;
 }
 
+.pill-success-text {
+  min-height: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--safe-green);
+  margin-top: 6px;
+  padding-left: 4px;
+}
+
 /* ---------- botões ---------- */
 .btn {
   font-family: var(--font-body);

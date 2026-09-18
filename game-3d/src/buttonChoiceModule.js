@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { shuffle } from './random.js';
+import { pulseHaptic } from './haptics.js';
 
 const BUTTON_COUNT = 4;
 const BUTTON_COLORS = [0xdd2222, 0x2255dd, 0xdddd22, 0x22aa44];
 const BUTTON_SIZE = 0.06;
 const BUTTON_DEPTH = 0.02;
 const BUTTON_SPACING = 0.11;
-// TEMP: aumentado de 0.05 para facilitar teste com mouse no Immersive Web
-// Emulator. Reverter para 0.05 antes de testar num Quest 3 real.
-const TOUCH_THRESHOLD = 0.09;
+// Valor calibrado pra Quest 3 (dedo/controller de verdade) — vem de
+// game-3d/src/difficulty.js por fase (`wireButtonTouchThreshold`), com este
+// número como fallback caso o módulo seja instanciado sem config (ex.:
+// testes isolados). Um valor maior só deve existir como override explícito
+// de DEV (ver main.js/game.js `devInputOverride`), nunca hardcoded aqui.
+const DEFAULT_TOUCH_THRESHOLD = 0.05;
 const FLASH_DURATION = 0.2;
 const PRESS_DEPTH = 0.012;
 const OUTLINE_SCALE = 1.4;
@@ -22,7 +26,7 @@ const OUTLINE_SCALE = 1.4;
 // até sair do modo de desarme — o resultado guardado é sempre o do ÚLTIMO
 // toque (last-press-wins), por isso o callback é chamado a cada toque, não
 // só uma vez.
-export function createButtonChoiceModule({ onResult }) {
+export function createButtonChoiceModule({ onResult, touchThreshold = DEFAULT_TOUCH_THRESHOLD, sfx }) {
   const group = new THREE.Group();
   let hoveredButton = null;
   let flashTimer = 0;
@@ -99,7 +103,7 @@ export function createButtonChoiceModule({ onResult }) {
 
   function findNearestButton(tipPositions) {
     let nearest = null;
-    let nearestDistance = TOUCH_THRESHOLD;
+    let nearestDistance = touchThreshold;
     for (const tip of tipPositions) {
       for (const button of buttons) {
         const distance = group.localToWorld(button.position.clone()).distanceTo(tip);
@@ -112,7 +116,7 @@ export function createButtonChoiceModule({ onResult }) {
     return nearest;
   }
 
-  function press(button) {
+  function press(button, controller) {
     flashButton = button;
     flashTimer = FLASH_DURATION;
     button.mesh.position.z = button.restZ - PRESS_DEPTH;
@@ -123,6 +127,10 @@ export function createButtonChoiceModule({ onResult }) {
     // SOMA luz por cima da cor original em vez de substituir, então um
     // botão azul piscando "vermelho" via emissive vira roxo, não vermelho.
     buttons.forEach((b) => b.mesh.material.color.set(button.color));
+    // Mesma intensidade pro botão certo e o errado — mesma regra do fio,
+    // não vaza o resultado.
+    pulseHaptic(controller, 0.3, 35);
+    sfx?.playButtonPress();
     onResult(button.correct);
   }
 
@@ -141,8 +149,8 @@ export function createButtonChoiceModule({ onResult }) {
     setHover(findNearestButton(tipPositions));
   }
 
-  function handleTrigger() {
-    if (hoveredButton) press(hoveredButton);
+  function handleTrigger(point, controller) {
+    if (hoveredButton) press(hoveredButton, controller);
   }
 
   function dispose() {

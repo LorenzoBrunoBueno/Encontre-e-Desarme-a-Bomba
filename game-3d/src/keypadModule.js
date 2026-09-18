@@ -1,16 +1,19 @@
 import * as THREE from 'three';
 import { createTextPanel } from './textPanel.js';
 import { randomInt } from './random.js';
+import { pulseHaptic } from './haptics.js';
 
 const CODE_LENGTH = 4;
 const BUTTON_SIZE = 0.05;
 const BUTTON_DEPTH = 0.02;
 const GRID_SPACING = 0.075;
-// TEMP: aumentado de 0.045 para facilitar teste com mouse no Immersive Web
-// Emulator. Reverter para 0.045 antes de testar num Quest 3 real (o valor
-// original já considera GRID_SPACING para minimizar sobreposição entre
-// botões vizinhos).
-const TOUCH_THRESHOLD = 0.08;
+// Valor calibrado pra Quest 3 (considera GRID_SPACING pra minimizar
+// sobreposição entre botões vizinhos) — vem de game-3d/src/difficulty.js
+// por fase (`keypadTouchThreshold`), com este número como fallback caso o
+// módulo seja instanciado sem config (ex.: testes isolados). Um valor maior
+// só deve existir como override explícito de DEV (main.js/game.js
+// `devInputOverride`), nunca hardcoded aqui.
+const DEFAULT_TOUCH_THRESHOLD = 0.045;
 const FLASH_DURATION = 0.15;
 const BUTTON_COLOR = 0x8899aa;
 const PRESS_COLOR = 0x33aa55;
@@ -47,7 +50,7 @@ const LAYOUT = [
 // digita sozinho — precisa de gatilho pra confirmar. O botão "OK" continua
 // só por toque (é um alvo isolado, sem vizinho perto pra esbarrar sem
 // querer).
-export function createKeypadModule({ onSolved }) {
+export function createKeypadModule({ onSolved, touchThreshold = DEFAULT_TOUCH_THRESHOLD, sfx }) {
   const padGroup = new THREE.Group();
   const displayGroup = new THREE.Group();
 
@@ -75,7 +78,9 @@ export function createKeypadModule({ onSolved }) {
   displayBezel.position.set(0, 0.02, BEZEL_FRONT_Z - BEZEL_DEPTH / 2);
   displayGroup.add(displayBezel);
 
-  const display = createTextPanel({ width: 0.22, height: 0.08, fontSize: 40 });
+  // 'flat': rótulo gravado na própria peça física do teclado, não um
+  // "menu" — mantém o visual original (sem vidro/glow, ver textPanel.js).
+  const display = createTextPanel({ width: 0.22, height: 0.08, fontSize: 40, style: 'flat' });
   display.mesh.position.set(0, 0.06, BUTTON_DEPTH / 2 + 0.001);
   displayGroup.add(display.mesh);
   renderBuffer();
@@ -90,7 +95,12 @@ export function createKeypadModule({ onSolved }) {
   const confirmRestZ = confirmMesh.position.z;
   const confirmLocalPos = confirmMesh.position.clone();
 
-  const confirmLabel = createTextPanel({ width: BUTTON_SIZE * 1.2, height: BUTTON_SIZE * 0.65, fontSize: 78 });
+  const confirmLabel = createTextPanel({
+    width: BUTTON_SIZE * 1.2,
+    height: BUTTON_SIZE * 0.65,
+    fontSize: 78,
+    style: 'flat',
+  });
   confirmLabel.setText('OK', '#111111', '#ffffff');
   confirmLabel.mesh.position.set(0, -0.06, BUTTON_DEPTH / 2 + 0.001);
   displayGroup.add(confirmLabel.mesh);
@@ -139,6 +149,7 @@ export function createKeypadModule({ onSolved }) {
         // Tripliquei (32→96): no tamanho antigo o dígito ficava minúsculo
         // dentro do botão, ilegível sem dar zoom.
         fontSize: 96,
+        style: 'flat',
       });
       label.setText(String(digit), '#111111', '#ffffff');
       label.mesh.position.set(x, y, BUTTON_DEPTH / 2 + 0.001);
@@ -157,7 +168,7 @@ export function createKeypadModule({ onSolved }) {
 
   function findNearestDigit(tipPositions) {
     let nearest = null;
-    let nearestDistance = TOUCH_THRESHOLD;
+    let nearestDistance = touchThreshold;
     for (const tip of tipPositions) {
       for (const button of buttons) {
         const distance = padGroup.localToWorld(button.position.clone()).distanceTo(tip);
@@ -170,12 +181,16 @@ export function createKeypadModule({ onSolved }) {
     return nearest;
   }
 
-  function pressDigit(button) {
+  function pressDigit(button, controller) {
     flashButton = button;
     flashTimer = FLASH_DURATION;
     button.mesh.material.color.set(PRESS_COLOR);
     button.mesh.position.z = button.restZ - PRESS_DEPTH;
     button.label.mesh.position.z -= PRESS_DEPTH;
+    // Digitar um dígito nunca revela se a senha final vai estar certa —
+    // pode vibrar sempre, sem risco de vazar resultado.
+    pulseHaptic(controller, 0.25, 30);
+    sfx?.playKeyPress();
 
     // Sem validação automática — só acumula. Ao encher os 4 dígitos, o
     // próximo toque começa um buffer novo (permite corrigir sem travar).
@@ -192,10 +207,12 @@ export function createKeypadModule({ onSolved }) {
 
     if (inputBuffer.length === CODE_LENGTH && inputBuffer === code) {
       solved = true;
+      sfx?.playKeyConfirm(true);
       onSolved();
     } else {
       inputBuffer = '';
       renderBuffer();
+      sfx?.playKeyConfirm(false);
     }
   }
 
@@ -223,7 +240,7 @@ export function createKeypadModule({ onSolved }) {
 
     let touchingConfirmNow = false;
     for (const tip of tipPositions) {
-      if (displayGroup.localToWorld(confirmLocalPos.clone()).distanceTo(tip) <= TOUCH_THRESHOLD) {
+      if (displayGroup.localToWorld(confirmLocalPos.clone()).distanceTo(tip) <= touchThreshold) {
         touchingConfirmNow = true;
         break;
       }
@@ -232,8 +249,8 @@ export function createKeypadModule({ onSolved }) {
     touchingConfirm = touchingConfirmNow;
   }
 
-  function handleTrigger() {
-    if (!solved && hoveredDigit) pressDigit(hoveredDigit);
+  function handleTrigger(point, controller) {
+    if (!solved && hoveredDigit) pressDigit(hoveredDigit, controller);
   }
 
   function dispose() {

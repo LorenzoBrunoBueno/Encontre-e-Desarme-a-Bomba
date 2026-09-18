@@ -1,15 +1,22 @@
 import { createGame } from './game.js';
+import { apiClient } from './apiClient.js';
 
 // Integração com o /frontend (2D) — ver CLAUDE.md, seção "Contrato de
 // eventos entre Frontend e Cena 3D", e frontend/instrucao.md pro porquê da
 // navegação real de página (em vez de SPA) entre as duas pastas.
 //
-// "defuse:playerId" e "defuse:pendingResult" no localStorage são o único
-// contrato entre este arquivo e frontend/js/session.js e
-// frontend/js/report.js — o nome das chaves não pode mudar de um lado sem
-// mudar do outro.
+// "defuse:playerId", "defuse:currentPhase", "defuse:pendingResult" e
+// "defuse:pendingPhase" no localStorage são o único contrato entre este
+// arquivo e frontend/js/session.js e frontend/js/report.js — o nome das
+// chaves não pode mudar de um lado sem mudar do outro. Isso só vale pro
+// caminho de SAIR da sessão WebXR ('roundExit', mais abaixo): desde o loop
+// contínuo entre fases (game-3d/instrucao.md), continuar jogando
+// ('roundContinue') nunca chega a navegar pro /frontend — este arquivo fala
+// direto com a API (./apiClient.js) nesse caso, e só nesse caso.
 const PLAYER_ID_KEY = 'defuse:playerId';
+const CURRENT_PHASE_KEY = 'defuse:currentPhase';
 const PENDING_RESULT_KEY = 'defuse:pendingResult';
+const PENDING_PHASE_KEY = 'defuse:pendingPhase';
 
 // Em produção (build via `vite build`, publicado em /game pelo
 // scripts/build-static.mjs) o frontend fica na raiz do mesmo domínio — por
@@ -35,6 +42,12 @@ const isDevServer = import.meta.env.DEV;
 const storedPlayerId = localStorage.getItem(PLAYER_ID_KEY);
 const hasRealSession = Boolean(storedPlayerId);
 const playerId = storedPlayerId || (isDevServer ? 'dev-local-player' : null);
+// Fase de dificuldade persistente (currentPhase da API) — o /frontend grava
+// essa chave antes de entrar em VR (ver frontend/js/session.js), buscando
+// GET /api/progress/{playerId}. Sem sessão real (dev local) ou sem valor
+// salvo ainda, cai pra fase 1 — createGame()/difficulty.js clampam de novo,
+// então um valor inválido aqui nunca quebra a cena, só vira fase 1.
+const currentPhase = parseInt(localStorage.getItem(CURRENT_PHASE_KEY), 10) || 1;
 
 if (!playerId) {
   // Só chega aqui num build de produção sem sessão real (em dev,
@@ -58,7 +71,11 @@ if (!playerId) {
     );
   }
 
-  const game = createGame();
+  // devInputOverride: conveniência SÓ de dev (mouse/Immersive Web Emulator,
+  // sem dedo/controller de verdade) — import.meta.env.DEV garante que nunca
+  // fica ativo num build de produção real (mesmo sinal já usado acima pra
+  // isDevServer).
+  const game = createGame({ phase: currentPhase, devInputOverride: isDevServer });
 
   game.on('bombDispensed', (bombId) => {
     console.log(`Bomba ${bombId} liberada pelo dispenser`);
@@ -70,17 +87,80 @@ if (!playerId) {
     void wasCorrect; // resultado só é exibido ao jogador no relatório final (roundEnd)
     console.log(`Bomba ${bombId} entregue`);
   });
+
+  // game.js decide SE a fase avançou (compara score contra o threshold da
+  // fase atual, ver difficulty.js) — dispara ANTES de 'roundEnd' (game.js
+  // emite os dois na mesma chamada de onRoundEnd, nessa ordem), sempre que
+  // o placar do turno bate o threshold, independente do jogador escolher
+  // "avançar" ou "jogar de novo" no painel de fim de turno (ver
+  // reportPanel.js) — passar do threshold já desbloqueia a fase pra sempre.
+  let pendingPhase = null;
+  game.on('phaseUnlocked', (newPhase) => {
+    pendingPhase = newPhase;
+    console.log(`Fase ${newPhase} desbloqueada`);
+  });
+
+  // Só guarda o resultado do turno que acabou de terminar — quem decide o
+  // que fazer com ele é 'roundContinue'/'roundExit' abaixo, disparados pelo
+  // painel interativo de fim de turno (loop contínuo entre fases, ver
+  // game-3d/instrucao.md).
+  let lastFinalScore = 0;
+  let lastDeathsCaused = 0;
   game.on('roundEnd', (finalScore, deathsCaused) => {
+    lastFinalScore = finalScore;
+    lastDeathsCaused = deathsCaused;
     if (!hasRealSession) {
-      // Sem frontend rodando nesta sessão de dev, não há pra onde navegar
-      // com o resultado — só loga, em vez de mandar pra um FRONTEND_URL que
-      // provavelmente não existe.
       console.log(`[dev] fim de turno — pontuação: ${finalScore}, mortes causadas: ${deathsCaused}`);
+    }
+  });
+
+  // Jogador escolheu "avançar"/"jogar de novo" — continua na MESMA sessão
+  // WebXR, sem navegar (não dá pra reabrir XR sozinho depois de navegar,
+  // exige um gesto novo do usuário). Como não vamos passar pelo
+  // /frontend (report.html) desta vez, este handler persiste o resultado
+  // direto via API (game-3d/src/apiClient.js) — o único lugar do game-3d
+  // que fala com a API, e só nesse caminho; "sair" (abaixo) continua
+  // delegando isso pro /frontend como sempre foi. Best-effort: o jogador já
+  // está jogando a rodada nova quando este fetch roda, uma falha aqui não
+  // trava nada, só perde o registro daquela rodada específica.
+  game.on('roundContinue', (newPhase) => {
+    const phaseJustUnlocked = pendingPhase;
+    pendingPhase = null;
+    localStorage.setItem(CURRENT_PHASE_KEY, String(newPhase));
+    if (!hasRealSession) return; // sessão de dev local, sem API pra falar
+    persistRound({ finalScore: lastFinalScore, deathsCaused: lastDeathsCaused, phaseJustUnlocked, newPhase }).catch(
+      (err) => {
+        console.warn('Não foi possível salvar o resultado/avanço de fase da rodada anterior:', err);
+      }
+    );
+  });
+
+  // Jogador escolheu "sair pro menu" — único caminho que ainda navega pra
+  // fora da sessão WebXR, exatamente como o antigo handler de 'roundEnd'
+  // fazia sozinho antes do loop contínuo existir; report.html é quem
+  // persiste (POST /api/scores, PATCH /api/progress), como sempre foi.
+  game.on('roundExit', () => {
+    if (!hasRealSession) {
+      console.log('[dev] saindo — sem frontend rodando nesta sessão, nada a persistir aqui.');
       return;
     }
-    localStorage.setItem(PENDING_RESULT_KEY, JSON.stringify({ finalScore, deathsCaused }));
+    localStorage.setItem(PENDING_RESULT_KEY, JSON.stringify({ finalScore: lastFinalScore, deathsCaused: lastDeathsCaused }));
+    if (pendingPhase !== null) {
+      localStorage.setItem(PENDING_PHASE_KEY, String(pendingPhase));
+    }
     location.href = `${FRONTEND_URL}report.html`;
   });
+
+  async function persistRound({ finalScore, deathsCaused, phaseJustUnlocked, newPhase }) {
+    await apiClient.postScore(playerId, finalScore, deathsCaused);
+    if (phaseJustUnlocked !== null) {
+      const progress = await apiClient.getProgress(playerId);
+      await apiClient.patchProgress(playerId, {
+        currentPhase: newPhase,
+        highestPhaseUnlocked: Math.max(progress.highestPhaseUnlocked, phaseJustUnlocked),
+      });
+    }
+  }
 
   game.start();
 }

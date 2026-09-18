@@ -10,6 +10,30 @@ on:
       - main
 
 jobs:
+  test_game3d:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Test game-3d (unit + e2e)
+    # Job separado, não bloqueia o deploy (build_and_deploy_job roda em
+    # paralelo) — os testes existiam (keypad.spec.js, depois full-loop.spec.js)
+    # mas nada em CI rodava npm run test:e2e/test:unit até aqui.
+    defaults:
+      run:
+        working-directory: ./game-3d
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests (difficulty.js)
+        run: npm run test:unit
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: E2E tests (IWER)
+        run: npm run test:e2e
+
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest

@@ -85,6 +85,42 @@
       </div>
     </div>
 
+    <!-- modal de seleção de fase (progresso persistente via
+         GET/PATCH /api/progress/{playerId}), aberto antes do tutorial -->
+    <div class="glass-scrim" id="phase-scrim" hidden>
+      <div class="glass-modal">
+        <div class="modal-head">
+          <h3>Escolha a fase</h3>
+          <button class="btn-close" id="phase-close" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="phase-grid" id="phase-list"></div>
+        <p class="pill-error-text" id="phase-error"></p>
+      </div>
+    </div>
+
+    <!-- modal de tutorial (aparece a cada "Entrar em VR", passo a passo) -->
+    <div class="glass-scrim" id="tutorial-scrim" hidden>
+      <div class="glass-modal tutorial-modal">
+        <div class="modal-head">
+          <h3>Como jogar</h3>
+          <button class="btn-close" id="tutorial-close" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="tutorial-step">
+          <span class="tutorial-icon" id="tutorial-icon" aria-hidden="true"></span>
+          <h4 class="tutorial-title" id="tutorial-title"></h4>
+          <p class="tutorial-body" id="tutorial-body"></p>
+        </div>
+        <div class="tutorial-dots" id="tutorial-dots"></div>
+        <div class="modal-actions tutorial-actions">
+          <button class="btn ghost" id="tutorial-skip" type="button">Pular tutorial</button>
+          <div class="tutorial-nav">
+            <button class="btn" id="tutorial-prev" type="button">Anterior</button>
+            <button class="btn primary" id="tutorial-next" type="button">Próximo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- modal de configurações -->
     <div class="glass-scrim" id="settings-scrim" hidden>
       <div class="glass-modal">
@@ -103,6 +139,7 @@
           </div>
           <p class="pill-error-text" id="settings-error"></p>
           <div class="modal-actions">
+            <button class="btn ghost" id="settings-logout" type="button">Sair da conta</button>
             <button class="btn primary" id="settings-submit" type="submit">Salvar</button>
           </div>
         </form>

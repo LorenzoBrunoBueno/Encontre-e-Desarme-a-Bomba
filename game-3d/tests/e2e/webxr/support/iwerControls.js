@@ -68,6 +68,71 @@ async function pressTrigger(page, handedness) {
   await waitFrames(page, 2); // dispara selectend
 }
 
+// Segura o grip (squeeze) — diferente de pressTrigger, fica "down" até
+// squeezeUp ser chamado explicitamente, porque grab.js reage a
+// squeezestart/squeezeend como um hold (pegar e carregar), não um toque
+// único como o gatilho.
+async function squeezeDown(page, handedness) {
+  await page.evaluate(
+    (handedness) => window.__iwer.xrDevice.controllers[handedness].updateButtonValue('squeeze', 1),
+    handedness
+  );
+  await waitFrames(page, 2); // processa o pendingValue → dispara squeezestart
+}
+
+async function squeezeUp(page, handedness) {
+  await page.evaluate(
+    (handedness) => window.__iwer.xrDevice.controllers[handedness].updateButtonValue('squeeze', 0),
+    handedness
+  );
+  await waitFrames(page, 2); // dispara squeezeend
+}
+
+// Arremesso de verdade: grab.js só entra em thrownObjects (velocidade
+// herdada, ver grab.js#updateControllerVelocities/squeezeend) se a
+// velocidade do controller no EXATO frame em que squeezeend dispara ainda
+// for > 0.5 m/s. Uma sequência de moveControllerTo()/squeezeUp() (cada uma
+// um round-trip Node↔página separado) não garante isso: entre um passo e o
+// próximo o controller fica PARADO por 1-2 frames antes do salto seguinte, e
+// como updateControllerVelocities roda a cada frame (grabSystem.update, fora
+// do `if (running)` de game.js), a velocidade calculada nos frames parados
+// decai de volta pra ~0 — squeezeend pode acabar disparando bem nesse
+// intervalo parado, sem nenhum arremesso de verdade acontecer.
+//
+// Este helper roda a animação INTEIRA (posição a cada frame + a liberação do
+// squeeze no meio) num único page.evaluate, com seu próprio loop de
+// requestAnimationFrame — sem round-trips Node↔página entre frames — pra
+// garantir velocidade constante em TODO frame do movimento, não só nos
+// instantes em que o Node decide reposicionar.
+async function throwTo(page, handedness, { from, to, releaseAtFrame = 3, totalFrames = 8 } = {}) {
+  await page.evaluate(
+    ({ handedness, from, to, releaseAtFrame, totalFrames }) =>
+      new Promise((resolve) => {
+        const controller = window.__iwer.xrDevice.controllers[handedness];
+        let frame = 0;
+        function tick() {
+          const t = Math.min(frame / totalFrames, 1);
+          controller.position.set(
+            from.x + (to.x - from.x) * t,
+            from.y + (to.y - from.y) * t,
+            from.z + (to.z - from.z) * t
+          );
+          if (frame === releaseAtFrame) {
+            controller.updateButtonValue('squeeze', 0);
+          }
+          frame += 1;
+          // +3 frames de margem no fim, parado no destino, pra garantir que
+          // o squeezeend (que só processa no PRÓXIMO frame depois do
+          // pendingValue) já disparou antes deste evaluate resolver.
+          if (frame <= totalFrames + 3) requestAnimationFrame(tick);
+          else resolve();
+        }
+        requestAnimationFrame(tick);
+      }),
+    { handedness, from, to, releaseAtFrame, totalFrames }
+  );
+}
+
 async function readDebugState(page) {
   return page.evaluate(() => ({
     inputBuffer: window.__debugState.inputBuffer,
@@ -89,6 +154,9 @@ export {
   enterXR,
   moveControllerTo,
   pressTrigger,
+  squeezeDown,
+  squeezeUp,
+  throwTo,
   readDebugState,
   keyWorldPosition,
   confirmWorldPosition,
