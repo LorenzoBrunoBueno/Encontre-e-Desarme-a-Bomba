@@ -292,6 +292,28 @@ footer.page-footer {
   font-family: var(--font-mono);
 }
 
+.corner-credits {
+  position: fixed;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--faint);
+  pointer-events: none;
+  z-index: 5;
+}
+.corner-credits-left {
+  left: 16px;
+}
+.corner-credits-right {
+  right: 16px;
+  text-align: right;
+}
+
 @media (max-width: 520px) {
   .hero-top { flex-direction: column; }
+  .corner-credits { display: none; }
 }
