@@ -2,14 +2,16 @@ import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 import { createRoomLayout, ROOM_HALF_X, ROOM_HALF_Z, ROOM_CEILING_Y } from './roomLayout.js';
-import { createTextPanel } from './textPanel.js';
+import { createTextPanel, billboardYaw } from './textPanel.js';
 import { createDispenser } from './dispenser.js';
 import { createCollectionBox } from './collectionBox.js';
 import { createScanner } from './scanner.js';
 import { createDefuseTable } from './defuseTable.js';
 import { createConveyor } from './conveyor.js';
 import { createTrashBin } from './trashBin.js';
-import { createDoor } from './door.js';
+import { DOOR_WIDTH, FRAME_HEIGHT } from './door.js';
+import { createRespawnRoom } from './respawnRoom.js';
+import { createScreenFade } from './screenFade.js';
 import {
   createConcreteFloorTexture,
   createRivetedWallTexture,
@@ -162,8 +164,17 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   // Luz global reduzida (era Hemisphere 1.2 + Directional 1) — dá espaço de
   // contraste pra iluminação por zona (seção 8 do guia), principalmente o
   // spot dedicado da mesa de desarme, que precisa ler como "mais escuro ao
-  // redor, foco na ação principal".
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.7));
+  // redor, foco na ação principal". Ajustada num achado de playtest manual
+  // via Immersive Web Emulator: intensidade 0.7 (com groundColor 0x444444)
+  // deixava o teto praticamente preto e prejudicava a leitura geral da sala
+  // no headset. Intensidade subiu pra 1.0 (ainda abaixo do 1.2 original) e
+  // o groundColor — o componente que domina superfícies voltadas pra baixo,
+  // como a face de baixo do teto — subiu de 0x444444 pra 0x5a5a5a; só subir
+  // a intensidade teria clareado as paredes (voltadas de lado, pegam mais
+  // skyColor) sem resolver o teto, que continuaria escuro por depender quase
+  // só do groundColor. Mantém o contraste "mais escuro ao redor" sem apagar
+  // o teto por completo.
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5a5a, 1.0));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
   dirLight.position.set(3, 10, 5);
   dirLight.castShadow = true;
@@ -217,13 +228,45 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   }
 
   addWall(ROOM_HALF_X * 2, ROOM_CEILING_Y, new THREE.Vector3(0, ROOM_CEILING_Y / 2, -ROOM_HALF_Z), 0); // norte
-  addWall(ROOM_HALF_X * 2, ROOM_CEILING_Y, new THREE.Vector3(0, ROOM_CEILING_Y / 2, ROOM_HALF_Z), Math.PI); // sul (livre p/ decoração)
   addWall(ROOM_HALF_Z * 2, ROOM_CEILING_Y, new THREE.Vector3(ROOM_HALF_X, ROOM_CEILING_Y / 2, 0), Math.PI / 2); // leste
   addWall(ROOM_HALF_Z * 2, ROOM_CEILING_Y, new THREE.Vector3(-ROOM_HALF_X, ROOM_CEILING_Y / 2, 0), Math.PI / 2); // oeste
 
+  // Parede sul: antes um único addWall sólido (a porta era só decoração
+  // colada na frente, sem vão real) — agora tem um vão de verdade do
+  // tamanho da porta (door.js#DOOR_WIDTH/FRAME_HEIGHT), pra dar acesso à
+  // salinha de reanimação (respawnRoom.js, fluxo de morte instantânea, ver
+  // triggerPlayerDeath mais abaixo). 2 segmentos laterais + uma verga acima
+  // do vão, no lugar do bloco único.
+  const SOUTH_GAP_HALF = DOOR_WIDTH / 2;
+  const southSideWidth = ROOM_HALF_X - SOUTH_GAP_HALF;
+  addWall(
+    southSideWidth,
+    ROOM_CEILING_Y,
+    new THREE.Vector3(-(SOUTH_GAP_HALF + southSideWidth / 2), ROOM_CEILING_Y / 2, ROOM_HALF_Z),
+    Math.PI
+  );
+  addWall(
+    southSideWidth,
+    ROOM_CEILING_Y,
+    new THREE.Vector3(SOUTH_GAP_HALF + southSideWidth / 2, ROOM_CEILING_Y / 2, ROOM_HALF_Z),
+    Math.PI
+  );
+  const southLintelHeight = ROOM_CEILING_Y - FRAME_HEIGHT;
+  addWall(
+    DOOR_WIDTH,
+    southLintelHeight,
+    new THREE.Vector3(0, FRAME_HEIGHT + southLintelHeight / 2, ROOM_HALF_Z),
+    Math.PI
+  );
+
+  // Cor levemente mais clara e roughness um pouco menor que o resto da sala
+  // (achado de playtest manual: a normal do teto aponta pra baixo, então a
+  // DirectionalLight — vinda de cima — nunca bate nela; o teto dependia só
+  // da HemisphereLight, e ficava quase preto) — pega mais luz refletida da
+  // HemisphereLight/pontuais próximas sem precisar de uma luz dedicada.
   const ceiling = new THREE.Mesh(
     new THREE.PlaneGeometry(ROOM_HALF_X * 2, ROOM_HALF_Z * 2),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.9 })
+    new THREE.MeshStandardMaterial({ color: 0x3a3a42, roughness: 0.75 })
   );
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = ROOM_CEILING_Y;
@@ -275,17 +318,21 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   wallPanelD.mesh.rotation.y = Math.PI;
   scene.add(wallPanelD.mesh);
 
-  // Porta de entrada/saída da sala, centrada na parede sul (a única sem
-  // estação) — por ora só decorativa; um fluxo real de entrada/saída
-  // (spawn do jogador, abrir/fechar) fica pra uma etapa futura.
-  // Posição em WALL_INNER_Z (face interna da parede, não o centro dela) —
-  // mesmo motivo do comentário acima; door.js usa deslocamentos locais
-  // pequenos (0.02 a 0.09) pra protuberância da porta/moldura A PARTIR
-  // dessa face, não a partir do centro da parede.
-  createDoor({
+  // Porta de entrada/saída da sala, centrada na parede sul (única sem
+  // estação) — agora um vão de verdade (ver os 3 addWall acima), abrindo
+  // pra uma salinha de reanimação (respawnRoom.js). Posição em WALL_INNER_Z
+  // (face interna da parede, não o centro dela) — mesmo motivo do
+  // comentário acima; door.js usa deslocamentos locais pequenos (0.02 a
+  // 0.09) pra protuberância da porta/moldura A PARTIR dessa face, não a
+  // partir do centro da parede. `outerWallZ` é a face EXTERNA da mesma
+  // parede — onde a salinha propriamente começa (game.js#triggerPlayerDeath
+  // usa `respawnRoom.machinePosition`/`containsPoint` pra mover o jogador
+  // pra lá e detectar quando ele sai).
+  const respawnRoom = createRespawnRoom({
     scene,
-    position: new THREE.Vector3(0, 0, WALL_INNER_Z),
-    rotationY: Math.PI,
+    outerWallZ: ROOM_HALF_Z + WALL_THICKNESS / 2,
+    doorInnerZ: WALL_INNER_Z,
+    doorRotationY: Math.PI,
   });
 
   // Luz de zona da porta (mesmo padrão de scannerLight/defuseTableLight) —
@@ -417,6 +464,9 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   // de câmera — ver bombExplosion.js/cameraShake.js pro porquê de cada escolha.
   const bombExplosionSfx = createBombExplosionSfx({ listener: audioListener });
   const cameraShake = createCameraShake({ player });
+  // Overlay de tela preta + mensagem de game over (fluxo de morte
+  // instantânea, ver triggerPlayerDeath/triggerGameOver mais abaixo).
+  const screenFade = createScreenFade({ camera });
 
   // SFX por estação (scan/corte/botão/teclado/queda) — um único player
   // compartilhado (ver audio.js#createSfxPlayer) passado adiante pro
@@ -473,9 +523,68 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   );
   queueFullPanel.mesh.visible = false;
   scene.add(queueFullPanel.mesh);
+
+  // Aviso de "fique em pé" — achado de playtest real no Quest 3: as
+  // estações (mesa, scanner, alavancas, esteira) ficam em alturas fixas a
+  // partir do chão físico (referência 'local-floor'), pensadas pra alcance
+  // de jogador em pé; jogando sentado, algumas ficam fora de alcance (ver
+  // game-3d/instrucao.md e CLAUDE.md, seção de requisitos de espaço). Preso
+  // à câmera (HUD, mesmo padrão de reportPanel.js) pra ficar visível não
+  // importa pra onde o jogador esteja olhando; aparece/desaparece sozinho
+  // com base na altura real da cabeça (camera.position.y, que em
+  // 'local-floor' é a altura real acima do chão) — sem bloquear o jogo,
+  // só avisa. Histerese (SHOW < HIDE) evita piscar na borda do limiar.
+  const STANDING_WARNING_SHOW_Y = 1.3;
+  const STANDING_WARNING_HIDE_Y = 1.4;
+  // Mesma largura/altura/fontSize de wallPanelC/D (game.js:267,272) — combo
+  // já validado pelo auto-fit de textPanel.js pra linhas de ~25-28
+  // caracteres (ver game-3d/instrucao.md, seção 10).
+  const standingWarningPanel = createTextPanel({ width: 0.62, height: 0.32, fontSize: 26 });
+  standingWarningPanel.setText(
+    ['JOGAR EM PE E OBRIGATORIO', 'SENTADO, ALCANCE FICA LIMITADO'],
+    '#ffcc33',
+    '#111111'
+  );
+  standingWarningPanel.mesh.position.set(0, -0.25, -0.7);
+  standingWarningPanel.mesh.visible = false;
+  camera.add(standingWarningPanel.mesh);
+  let standingWarningVisible = false;
+  function updateStandingWarning() {
+    const headHeight = camera.position.y;
+    if (!standingWarningVisible && headHeight < STANDING_WARNING_SHOW_Y) {
+      standingWarningVisible = true;
+      standingWarningPanel.mesh.visible = true;
+    } else if (standingWarningVisible && headHeight > STANDING_WARNING_HIDE_Y) {
+      standingWarningVisible = false;
+      standingWarningPanel.mesh.visible = false;
+    }
+  }
+
   // Holograma de apoio no teto central — complementa o panfleto físico,
   // mostrando os dados da última bomba escaneada de qualquer ponto da sala.
   const hologram = createHologramDisplay({ scene, camera });
+
+  // Contador de "bombas entregues" — feedback de RITMO durante a partida,
+  // sem vazar resultado individual (soma toda entrega, certa ou errada,
+  // igual ao scoreManager.bombLog.length; placar numérico continua só no
+  // relatório final, ver CLAUDE.md "Pontuação"). Mesmo padrão de billboard
+  // do holograma ao lado (visível de qualquer estação), deslocado no X pra
+  // não sobrepor.
+  const deliveryCounterPanel = createTextPanel({ width: 0.5, height: 0.28, fontSize: 30 });
+  deliveryCounterPanel.setText(['BOMBAS', 'ENTREGUES: 0'], '#8affc1', '#0d0d12');
+  deliveryCounterPanel.mesh.position.set(
+    hologram.mesh.position.x + 0.85,
+    hologram.mesh.position.y,
+    hologram.mesh.position.z
+  );
+  scene.add(deliveryCounterPanel.mesh);
+  function updateDeliveryCounterPanel() {
+    deliveryCounterPanel.setText(
+      ['BOMBAS', `ENTREGUES: ${scoreManager.bombLog.length}`],
+      '#8affc1',
+      '#0d0d12'
+    );
+  }
 
   const scanner = createScanner({
     scene,
@@ -559,6 +668,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     grabSystem,
     onDeliver: (bombId, wasCorrect) => {
       scoreManager.recordDelivery(bombId, wasCorrect);
+      updateDeliveryCounterPanel();
       const index = bombs.findIndex((bomb) => bomb.id === bombId);
       if (index !== -1) bombs.splice(index, 1);
       bombFlow.notifyDelivered();
@@ -652,40 +762,48 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   // toca a sessão inteira, sem reiniciar entre rodadas continuadas
   // (resetRound não toca nisso de propósito).
   const backgroundMusic = createBackgroundMusic({ listener: audioListener });
+
+  // Extraído do callback onRoundEnd do roundTimer (era inline) — o fluxo de
+  // morte instantânea (triggerGameOver, mais abaixo) também encerra a
+  // rodada pelo mesmo caminho quando o jogador morre 2x sem sair da salinha
+  // de reanimação, então os dois gatilhos (timer oculto zerado / game over
+  // por morte) precisam do mesmo comportamento de fim de rodada.
+  function finishRound() {
+    running = false;
+    tensionCue.stop();
+
+    // Progressão de fase persistente (currentPhase/highestPhaseUnlocked na
+    // API) — só qualifica quando o placar do turno bate o `scoreToAdvance`
+    // da fase atual (null na última fase = teto, nunca avança sozinho).
+    // Emitido incondicionalmente ao qualificar, independente do jogador
+    // escolher "avançar" ou "jogar de novo" no painel abaixo — passar do
+    // threshold já desbloqueia a próxima fase pra sempre (highestPhaseUnlocked
+    // só cresce), mesmo que ele opte por continuar treinando a fase atual.
+    const canAdvance =
+      difficulty.scoreToAdvance !== null &&
+      scoreManager.score >= difficulty.scoreToAdvance &&
+      currentPhase < MAX_PHASE;
+    const nextPhase = currentPhase + 1;
+
+    // Painel interativo (reportPanel.js) — loop contínuo entre fases: o
+    // jogador escolhe dentro da própria sessão WebXR, sem sair do headset
+    // (ver comentário no topo do arquivo e resetRound/handleContinue/
+    // handleExit mais abaixo).
+    reportPanel.show(scoreManager.score, scoreManager.deathsCaused, scoreManager.playerDeaths, scoreManager.bombLog, {
+      canAdvance,
+      nextPhase,
+      onAdvance: () => handleContinue(nextPhase),
+      onReplay: () => handleContinue(currentPhase),
+      onExit: handleExit,
+    });
+
+    emit('roundEnd', scoreManager.score, scoreManager.deathsCaused);
+    if (canAdvance) emit('phaseUnlocked', nextPhase);
+  }
+
   const roundTimer = createRoundTimer({
     onTensionStart: () => tensionCue.start(),
-    onRoundEnd: () => {
-      running = false;
-      tensionCue.stop();
-
-      // Progressão de fase persistente (currentPhase/highestPhaseUnlocked na
-      // API) — só qualifica quando o placar do turno bate o `scoreToAdvance`
-      // da fase atual (null na última fase = teto, nunca avança sozinho).
-      // Emitido incondicionalmente ao qualificar, independente do jogador
-      // escolher "avançar" ou "jogar de novo" no painel abaixo — passar do
-      // threshold já desbloqueia a próxima fase pra sempre (highestPhaseUnlocked
-      // só cresce), mesmo que ele opte por continuar treinando a fase atual.
-      const canAdvance =
-        difficulty.scoreToAdvance !== null &&
-        scoreManager.score >= difficulty.scoreToAdvance &&
-        currentPhase < MAX_PHASE;
-      const nextPhase = currentPhase + 1;
-
-      // Painel interativo (reportPanel.js) — loop contínuo entre fases: o
-      // jogador escolhe dentro da própria sessão WebXR, sem sair do headset
-      // (ver comentário no topo do arquivo e resetRound/handleContinue/
-      // handleExit mais abaixo).
-      reportPanel.show(scoreManager.score, scoreManager.deathsCaused, scoreManager.bombLog, {
-        canAdvance,
-        nextPhase,
-        onAdvance: () => handleContinue(nextPhase),
-        onReplay: () => handleContinue(currentPhase),
-        onExit: handleExit,
-      });
-
-      emit('roundEnd', scoreManager.score, scoreManager.deathsCaused);
-      if (canAdvance) emit('phaseUnlocked', nextPhase);
-    },
+    onRoundEnd: finishRound,
   });
 
   // Extraído em função (não uma única const) porque resetRound precisa
@@ -753,6 +871,33 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     });
   }
 
+  // Remove uma bomba da cena/grabSystem/array `bombs` e descarta seus
+  // recursos — usado tanto por resetRound (descarta toda bomba não
+  // entregue da rodada anterior) quanto pelo fusível zerado em animate()
+  // (a bomba "explode" e some, ver triggerPlayerDeath). NÃO mexe no núcleo
+  // exposto (`bomb.rearPanelModule.coreObject`) mesmo se `bomb.coreExposed`
+  // — motivo já documentado em rearPanelModule.js#dispose (o núcleo pode ter
+  // sido separado da bomba e seguir vivo na cena/na mão do jogador). Antes
+  // este bloco arrancava o núcleo de qualquer jeito, inclusive da MÃO do
+  // jogador se ele estivesse carregando o núcleo no exato momento em que o
+  // fusível desta bomba zerasse — dois donos (aqui e trashBin.js) disputando
+  // o mesmo objeto (achado do teste completo de fluxos, 2026-09-22, ver
+  // game-3d/instrucao.md seção 15). Agora trashBin.js é o único dono do
+  // núcleo desde que ele é exposto (`watchCore`, chamado por
+  // defuseTable.js#onCoreExposed) até ele ser descartado de verdade
+  // (jogado na lixeira) ou até `trashBin.reset()` varrer o que sobrou no
+  // fim da rodada — nunca mais por aqui.
+  function disposeBomb(bomb) {
+    grabSystem.unregister(bomb.group);
+    if (bomb.pamphletGroup) {
+      grabSystem.unregister(bomb.pamphletGroup);
+      bomb.pamphletGroup.parent?.remove(bomb.pamphletGroup);
+      disposeObject3D(bomb.pamphletGroup);
+    }
+    bomb.group.parent?.remove(bomb.group);
+    bomb.dispose();
+  }
+
   // Reinicia a rodada em memória, sem recriar renderer/sessão/sala (loop
   // contínuo entre fases, ver comentário no topo do arquivo) — chamado só
   // por handleContinue abaixo. `newPhase` já vem calculado por quem chamou
@@ -767,30 +912,23 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     // ficaria travado pra sempre na rodada nova.
     if (defuseTable.isActive) defuseTable.exitMode();
 
+    // Mesma ideia da guarda acima, mas pro fluxo de morte instantânea: sem
+    // isso uma rodada nova podia começar com a tela preta presa ou a porta
+    // da salinha de reanimação aberta por causa da rodada anterior.
+    resetDeathSequence();
+
     // Solta qualquer coisa que ainda esteja na mão (bomba, panfleto,
     // ferramenta) ANTES de descartar bombas — evita mexer em objetos ainda
     // presos a um controller.
     grabSystem.releaseAll();
 
-    // Descarta toda bomba não entregue da rodada anterior — incluindo
-    // panfleto/núcleo mesmo que já tenham sido separados da bomba original
-    // (ver disposeObject3D acima).
+    // Descarta toda bomba não entregue da rodada anterior — incluindo o
+    // panfleto, mesmo que já tenha sido separado da bomba original (ver
+    // disposeObject3D acima). O núcleo NÃO é tratado aqui (ver
+    // disposeBomb) — `trashBin.reset()`, logo abaixo, é quem varre qualquer
+    // núcleo exposto que tenha sobrado da rodada anterior.
     while (bombs.length) {
-      const bomb = bombs.pop();
-      grabSystem.unregister(bomb.group);
-      if (bomb.pamphletGroup) {
-        grabSystem.unregister(bomb.pamphletGroup);
-        bomb.pamphletGroup.parent?.remove(bomb.pamphletGroup);
-        disposeObject3D(bomb.pamphletGroup);
-      }
-      if (bomb.coreExposed) {
-        const core = bomb.rearPanelModule.coreObject;
-        grabSystem.unregister(core);
-        core.parent?.remove(core);
-        disposeObject3D(core);
-      }
-      bomb.group.parent?.remove(bomb.group);
-      bomb.dispose();
+      disposeBomb(bombs.pop());
     }
 
     dispenser.reset();
@@ -802,6 +940,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     queueFullPanel.mesh.visible = false;
 
     scoreManager = createScoreManager();
+    updateDeliveryCounterPanel();
     bombFlow = buildBombFlow(difficulty);
     bombFlow.start();
 
@@ -838,6 +977,126 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   function handleExit() {
     reportPanel.hide();
     emit('roundExit');
+  }
+
+  // Morte instantânea + salinha de reanimação: consequência real pro
+  // fusível de uma bomba chegar a zero (antes só alimentava o alarme
+  // sonoro/háptico de proximityAlarm.js, sem efeito nenhum). Gatilho é SÓ
+  // fusível zerado (entrega incorreta continua só com o efeito que já tinha,
+  // ver onIncorrectDelivery do conveyor acima) e mata não importa a
+  // distância até a bomba (sala fechada). Máquina de estados simples, sem
+  // setTimeout — atualizada em updateDeathSequence, chamada todo frame de
+  // animate() (mesmo padrão de acumulador de dispenser.js/bombFlow.js).
+  const BLACKOUT_SECONDS = 2.5; // placeholder, ajustável por playtesting
+  const REVIVE_FADE_SECONDS = 1.5; // placeholder — câmera volta ao normal aos poucos
+  const GAME_OVER_HOLD_SECONDS = 3; // placeholder — tempo com a mensagem de game over na tela
+  // Mais forte que o tremor padrão de entrega incorreta (cameraShake.trigger()
+  // sem argumentos, ver conveyor.js#onIncorrectDelivery) — a bomba "explode"
+  // bem mais perto do jogador dessa vez (o fusível zerou em algum lugar da
+  // sala, não do outro lado da esteira).
+  const DEATH_SHAKE_INTENSITY = 0.09;
+  const DEATH_SHAKE_DURATION = 0.8;
+
+  // `insideRespawnRoom`: true do momento da morte até o jogador teleportar
+  // de volta pro jogo — é a janela de risco de "game over" (2ª explosão
+  // enquanto ainda dentro da salinha). `deathPhase` só controla a animação
+  // do blackout/revive dentro dessa janela.
+  let insideRespawnRoom = false;
+  let deathPhase = 'none'; // 'none' | 'blackout' | 'gameOverHold'
+  let deathTimer = 0;
+
+  function triggerPlayerDeath() {
+    if (insideRespawnRoom) {
+      triggerGameOver();
+      return;
+    }
+
+    insideRespawnRoom = true;
+    deathPhase = 'blackout';
+    deathTimer = BLACKOUT_SECONDS;
+
+    grabSystem.releaseAll();
+    if (defuseTable.isActive) defuseTable.exitMode();
+    teleport.lock();
+    scoreManager.recordPlayerDeath();
+    bombExplosionSfx.play();
+    cameraShake.trigger(DEATH_SHAKE_INTENSITY, DEATH_SHAKE_DURATION);
+    screenFade.snapOpaque();
+  }
+
+  function triggerGameOver() {
+    // Idempotente enquanto o hold já está rodando — achado do reteste
+    // desta mesma correção (2026-09-22): sem essa guarda, uma 3ª/4ª bomba
+    // explodindo DURANTE os `GAME_OVER_HOLD_SECONDS` (o jogador continua
+    // "insideRespawnRoom" até escolher continuar no painel final, então
+    // qualquer explosão nesse meio tempo cai aqui de novo) reiniciava o
+    // hold do zero e contava outra morte a cada vez — "SUAS MORTES" subia
+    // sem limite em vez de parar em 2 (a revivida + a fatal).
+    if (deathPhase === 'gameOverHold') return;
+
+    deathPhase = 'gameOverHold';
+    deathTimer = GAME_OVER_HOLD_SECONDS;
+    grabSystem.releaseAll();
+    teleport.lock();
+    // Achado do teste completo de fluxos (2026-09-22, ver
+    // game-3d/instrucao.md seção 15): antes só triggerPlayerDeath() contava
+    // uma morte — uma partida que terminasse em game over mostrava
+    // "SUAS MORTES: 1" no relatório final mesmo já tendo matado o jogador
+    // 2 vezes (a revivida + a fatal). Contar as duas aqui bate com o que o
+    // jogador de fato viveu.
+    scoreManager.recordPlayerDeath();
+    bombExplosionSfx.play();
+    cameraShake.trigger(DEATH_SHAKE_INTENSITY, DEATH_SHAKE_DURATION);
+    screenFade.snapOpaque();
+    screenFade.showGameOverText(['MAQUINA DE REANIMACAO DESTRUIDA', 'FIM DE JOGO']);
+  }
+
+  // Chamada todo frame de dentro do `if (running)` de animate() — o fade/
+  // texto de game over continua avançando via screenFade.update() separado
+  // (chamado incondicionalmente, ver animate() mais abaixo), mas a máquina
+  // de estados em si só avança enquanto a rodada está rolando (não faz
+  // sentido morrer depois que o timer oculto já encerrou a rodada).
+  function updateDeathSequence(dt) {
+    if (deathPhase === 'blackout') {
+      deathTimer -= dt;
+      if (deathTimer <= 0) {
+        player.position.set(respawnRoom.machinePosition.x, player.position.y, respawnRoom.machinePosition.z);
+        respawnRoom.openDoor();
+        teleport.unlock();
+        screenFade.fadeTo(0, REVIVE_FADE_SECONDS);
+        deathPhase = 'none';
+      }
+    } else if (deathPhase === 'gameOverHold') {
+      deathTimer -= dt;
+      if (deathTimer <= 0) {
+        deathPhase = 'none';
+        screenFade.hideGameOverText();
+        finishRound();
+        screenFade.fadeTo(0, REVIVE_FADE_SECONDS);
+      }
+    }
+
+    // Detecta a saída da salinha (só importa enquanto ainda há risco de
+    // game over, ver triggerPlayerDeath) — fecha a porta sozinha, sem
+    // interação manual do jogador (pedido do usuário).
+    if (insideRespawnRoom && deathPhase === 'none' && !respawnRoom.containsPoint(player.position)) {
+      insideRespawnRoom = false;
+      respawnRoom.closeDoor();
+    }
+  }
+
+  // Reseta qualquer sequência de morte em andamento — chamado por
+  // resetRound (loop contínuo entre fases) pra garantir que uma rodada nova
+  // nunca começa com a tela preta ou a porta da salinha aberta por causa da
+  // rodada anterior.
+  function resetDeathSequence() {
+    insideRespawnRoom = false;
+    deathPhase = 'none';
+    deathTimer = 0;
+    respawnRoom.closeDoor();
+    screenFade.hideGameOverText();
+    screenFade.fadeTo(0, 0);
+    teleport.unlock();
   }
 
   // Tutorial guiado da PRIMEIRA bomba da sessão (pedido do usuário): uma
@@ -961,7 +1220,33 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
       // Fusível de cada bomba corre em toda estação, não só na mesa de
       // desarme — por isso é tickado aqui incondicionalmente, separado do
       // update() de cada módulo (que só faz algo quando a bomba está ativa).
-      bombs.forEach((bomb) => bomb.tickTimer(dt));
+      // Bomba cujo fusível chega a zero "explode": some da cena e mata o
+      // jogador na hora (triggerPlayerDeath) — só UMA morte mesmo se mais de
+      // uma zerar no mesmo frame (ex.: fila cheia na caixa de coleta).
+      let bombExploded = false;
+      for (let i = bombs.length - 1; i >= 0; i--) {
+        const bomb = bombs[i];
+        bomb.tickTimer(dt);
+        if (bomb.fuseRemaining === 0) {
+          bombs.splice(i, 1);
+          disposeBomb(bomb);
+          bombExploded = true;
+          // Achado do teste completo de fluxos (2026-09-22, ver
+          // game-3d/instrucao.md seção 15): se a bomba que explodiu é a
+          // mesma que o tutorial guiado está acompanhando, sem isso a seta
+          // ficava presa pra sempre apontando pra uma bomba que não existe
+          // mais (só `resetRound`, no limite de RODADA, forçava
+          // tutorialStep='done' — não cobria uma bomba individual sumindo
+          // no meio da rodada). Mesmo padrão já usado pelo conveyor.js
+          // (onDeliver) pra encerrar o tutorial quando a bomba acompanhada
+          // sai de cena por outro caminho.
+          if (bomb.id === tutorialBombId && tutorialStep !== 'done') {
+            tutorialBomb = null;
+            showTutorialStep('done');
+          }
+        }
+      }
+      if (bombExploded) triggerPlayerDeath();
       proximityAlarm.update(dt, bombs);
       scanner.update(dt, controllerTipPositions, bombs);
       centerLever.update(dt, controllerTipPositions);
@@ -976,14 +1261,22 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
         updateDefuseTutorialSubstep();
       }
       tutorialGuide.update(dt);
+      updateDeathSequence(dt);
     }
     teleport.update();
     // Depois de teleport.update() de propósito: o shake soma seu próprio
     // offset em cima de qualquer player.position já atualizado neste frame
     // (ver comentário em cameraShake.js sobre o delta reversível).
     cameraShake.update(dt);
+    // Fora do `if (running)` de propósito: o fade de volta (revive/game
+    // over → relatório) continua animando mesmo depois de finishRound()
+    // já ter marcado running=false (ver triggerGameOver/updateDeathSequence).
+    respawnRoom.update(dt);
+    screenFade.update(dt);
+    updateStandingWarning();
     utilityBelt.update();
     hologram.update();
+    billboardYaw(deliveryCounterPanel.mesh, camera);
     // Fora do `if (running)`: o painel de fim de turno só fica visível
     // exatamente quando running===false (round congelado), e precisa
     // continuar respondendo à mira/gatilho pro jogador conseguir escolher

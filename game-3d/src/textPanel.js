@@ -218,3 +218,18 @@ export function createTextPanel({ width = 0.4, height = 0.2, fontSize = 56, styl
 
   return { mesh, setText, dispose };
 }
+
+const billboardScratch = new THREE.Vector3();
+
+// Gira `mesh` (um painel de createTextPanel, direto na raiz da scene) só no
+// YAW pra sempre encarar a câmera — mesma técnica usada por
+// hologramDisplay.js, extraída pra reaproveitar em qualquer painel "preso
+// perto do teto, legível de qualquer estação da sala" (billboard completo
+// inclinaria o painel de um jeito estranho quando o jogador olha pra cima/
+// baixo, por isso a altura Y da câmera é travada na do próprio painel antes
+// do lookAt).
+export function billboardYaw(mesh, camera) {
+  camera.getWorldPosition(billboardScratch);
+  billboardScratch.y = mesh.position.y;
+  mesh.lookAt(billboardScratch);
+}

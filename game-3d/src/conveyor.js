@@ -17,6 +17,17 @@ const CART_RANGE = 0.32;
 // usa valores mais generosos que estes por causa disso (ver difficulty.js).
 const DEFAULT_CART_CYCLE_SPEED = 0.5; // ciclos por segundo do vaivém
 const DEFAULT_CART_HIT_RADIUS = 0.18;
+// Área de assistência de arremesso — bem maior que o carrinho-alvo acima e
+// FIXA (não acompanha o vaivém). Achado de playtest: mesmo com o carrinho já
+// facilitado por fase (ver difficulty.js), exigir coincidir a posição exata
+// dele no instante do arremesso continuava frustrante — a mira do jogador já
+// é o suficiente de desafio, sem precisar também acertar o timing do
+// vaivém. Qualquer arremesso que passe perto o bastante da esteira (mesmo
+// sem tocar o carrinho miniatura) já entrega a bomba, "puxando" ela pro
+// mesmo trajeto de saída que um acerto no carrinho dispara (ver
+// beginDelivery). Fixa entre fases de propósito — só facilita a ENTREGA,
+// não deveria interferir na curva de dificuldade dos 3 desafios da bancada.
+const THROW_ASSIST_RADIUS = 0.55;
 // Trajeto até o vão de saída (RoomRefactor item 3) — ao acertar o carrinho,
 // a bomba já não desaparece na hora: continua em linha reta até cruzar a
 // cortina de tiras PVC bem perto da parede de trás, só aí conta como
@@ -99,6 +110,14 @@ export function createConveyor({
   group.add(cart);
   let cartPhase = 0;
 
+  // Âncora invisível da área de assistência (THROW_ASSIST_RADIUS) — centrada
+  // no meio do trajeto do carrinho (mesma altura, Z=0), grande o bastante pra
+  // cobrir todo o range de vaivém (CART_RANGE) mais uma margem generosa, sem
+  // depender da posição instantânea do carrinho.
+  const throwAssistAnchor = new THREE.Object3D();
+  throwAssistAnchor.position.set(0, 0.5, 0);
+  group.add(throwAssistAnchor);
+
   // Cortina de tiras PVC + moldura escura no vão de saída (RoomRefactor item
   // 3) — a bomba "some" atrás delas, não simplesmente desaparece no ar.
   const curtainMaterial = new THREE.MeshStandardMaterial({
@@ -168,13 +187,20 @@ export function createConveyor({
     onDeliver?.(bomb.id, wasCorrect);
   }
 
+  // Compartilhado pelos dois registros abaixo (carrinho exato + área de
+  // assistência) — qualquer um dos dois que acertar primeiro entrega a
+  // bomba do mesmo jeito (grabSystem#updateThrownObjects só testa um alvo
+  // por frame por objeto, nunca dispara os dois pro mesmo arremesso).
+  function handleThrowHit(object3D) {
+    const bomb = latestBombs.find((b) => b.group === object3D);
+    if (bomb) beginDelivery(bomb);
+  }
+
   // Guarda a referência do alvo (não só registra) — cartHitRadius muda por
   // fase (difficulty.js); reset() abaixo atualiza o raio direto neste
   // registro em vez de desregistrar/registrar de novo a cada rodada.
-  const cartThrowTarget = grabSystem.registerThrowTarget(cart, cartHitRadius, (object3D) => {
-    const bomb = latestBombs.find((b) => b.group === object3D);
-    if (bomb) beginDelivery(bomb);
-  });
+  const cartThrowTarget = grabSystem.registerThrowTarget(cart, cartHitRadius, handleThrowHit);
+  grabSystem.registerThrowTarget(throwAssistAnchor, THROW_ASSIST_RADIUS, handleThrowHit);
 
   function update(dt, tipPositions, bombs) {
     latestBombs = bombs;

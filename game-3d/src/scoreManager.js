@@ -9,6 +9,11 @@ const INCORRECT_POINTS = -100;
 export function createScoreManager() {
   let score = 0;
   let deathsCaused = 0;
+  // Mortes do PRÓPRIO jogador (fusível zerado — game.js#triggerPlayerDeath)
+  // — conceito diferente de `deathsCaused` (terceiros, por entrega errada).
+  // Sem efeito na pontuação (a penalidade é só o tempo perdido no blackout/
+  // reanimação), só exibido no relatório final (reportPanel.js).
+  let playerDeaths = 0;
   const bombLog = [];
 
   function recordDelivery(bombId, wasCorrect) {
@@ -21,13 +26,21 @@ export function createScoreManager() {
     bombLog.push({ bombId, wasCorrect });
   }
 
+  function recordPlayerDeath() {
+    playerDeaths += 1;
+  }
+
   return {
     recordDelivery,
+    recordPlayerDeath,
     get score() {
       return score;
     },
     get deathsCaused() {
       return deathsCaused;
+    },
+    get playerDeaths() {
+      return playerDeaths;
     },
     get bombLog() {
       return bombLog;

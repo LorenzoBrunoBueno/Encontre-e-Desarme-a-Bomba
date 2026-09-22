@@ -7,7 +7,10 @@ import { pulseHaptic } from './haptics.js';
 // até ficar minúsculo — 6 linhas cabem com uma fonte de verdade legível, e
 // cobre qualquer rodada normal sem ficar cortando informação real.
 const MAX_LOG_LINES = 6;
-const SUMMARY_Y = 0.36;
+// SUMMARY_Y subiu um pouco (era 0.36) e o painel ganhou altura (era 0.16) —
+// a 3ª linha de resumo (SUAS MORTES, ver scoreManager.js#playerDeaths)
+// precisava de mais espaço vertical sem encostar no log logo abaixo.
+const SUMMARY_Y = 0.4;
 const LOG_Y = 0.08;
 const LOG_HEIGHT = 0.32;
 const BUTTON_WIDTH = 0.5;
@@ -36,7 +39,7 @@ const RAY_COLOR_HOVER = 0xffd54f;
 // teleport.js, com raio visível) resolve os dois problemas — funciona a
 // qualquer distância confortável do corpo.
 export function createReportPanel(camera, controllers) {
-  const summary = createTextPanel({ width: 0.5, height: 0.16, fontSize: 26 });
+  const summary = createTextPanel({ width: 0.5, height: 0.2, fontSize: 24 });
   summary.mesh.position.set(0, SUMMARY_Y, -0.7);
   summary.mesh.visible = false;
   camera.add(summary.mesh);
@@ -84,8 +87,11 @@ export function createReportPanel(camera, controllers) {
     button.panel.setText(button.label, hovered ? '#111111' : '#ffffff', hovered ? '#ffd54f' : '#2a2a2a');
   }
 
-  function show(score, deathsCaused, bombLog, { canAdvance, nextPhase, onAdvance, onReplay, onExit }) {
-    summary.setText([`PONTUACAO: ${score}`, `MORTES CAUSADAS: ${deathsCaused}`], '#ffd54f');
+  function show(score, deathsCaused, playerDeaths, bombLog, { canAdvance, nextPhase, onAdvance, onReplay, onExit }) {
+    summary.setText(
+      [`PONTUACAO: ${score}`, `MORTES CAUSADAS: ${deathsCaused}`, `SUAS MORTES: ${playerDeaths}`],
+      '#ffd54f'
+    );
     summary.mesh.visible = true;
 
     const lines = bombLog.length

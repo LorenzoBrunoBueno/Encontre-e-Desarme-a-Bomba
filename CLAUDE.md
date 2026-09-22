@@ -224,9 +224,10 @@ bem na resolução de VR).
 
 ## Pontuação
 
-- O jogador **não sabe se acertou ou errou** no momento da entrega — o
-  resultado só é revelado no **relatório final**, ao fim do turno, listando
-  o resultado de cada bomba entregue.
+- O jogador sente o resultado de cada entrega na hora, pelo **som/efeito da
+  esteira** (ver "Sistema de áudio e feedback") — mas o **placar numérico e
+  o relatório detalhado** (quantas bombas, qual foi certa/errada) ficam
+  ocultos até o **relatório final**, ao fim do turno.
 - Uma entrega é considerada **incorreta** se: a bomba foi entregue **sem
   ter sido desarmada** (nenhum dos 3 desafios resolvido), **ou** algum dos
   3 desafios (fio, botão, senha) foi **resolvido incorretamente**.
@@ -438,6 +439,51 @@ Nenhuma das duas usa motor de física real (a regra da seção "Stack
 tecnológica" continua valendo) — é velocidade/gesto medido diretamente
 pela posição do controller, sem colisão de verdade.
 
+## Requisitos de uso e espaço físico
+
+Decisão confirmada depois de testar num Meta Quest 3 real (diagnóstico
+técnico completo em `game-3d/instrucao.md`, seção 14): o jogo é **projetado
+pra ser jogado em pé**, não sentado. As estações (mesa de desarme, scanner,
+alavancas, esteira) são mobília fixa da sala, com alturas absolutas medidas
+a partir do chão físico calibrado pelo próprio Quest (referência WebXR
+`local-floor`) — jogando sentado, o alcance real do braço a partir da
+cadeira fica abaixo do necessário para várias interações, mesmo com o cinto
+utilitário já corrigido para acompanhar a altura real da cabeça do jogador
+em vez de uma altura de cintura fixa assumindo alguém em pé. O jogo detecta
+e avisa (não bloqueia) quando a cabeça do jogador fica abaixo de ~1.3m do
+chão físico por um tempo, sugerindo que ele fique em pé.
+
+Recomendações de espaço físico a comunicar ao jogador antes de entrar em VR
+(ex.: tela inicial do `/frontend`, antes do botão "Entrar em VR"):
+
+- **Jogar em pé**, sobre piso firme e nivelado, sem tapetes soltos ou
+  desníveis.
+- **Espaço livre mínimo recomendado: 2m × 2m**, sem móveis, paredes ou
+  objetos a menos de ~1m do jogador em qualquer direção. O jogo usa
+  locomoção por teleporte (não exige caminhar de verdade pela sala virtual,
+  que tem 6m × 5.2m — ver `roomLayout.js`), mas arremesso (bomba, núcleo) e
+  puxão (force pull) envolvem esticar/girar os braços com velocidade, e
+  esse movimento real precisa de espaço seguro ao redor do jogador.
+- **Configurar o Guardian/boundary do Quest 3 em modo em pé (room-scale)**,
+  não "sentado", dimensionado para o espaço real disponível, antes de
+  iniciar a partida.
+- **Evitar espaços estreitos tipo corredor** — testado e confirmado como
+  problemático: o jogador não consegue girar nem esticar os braços com
+  segurança, e o próprio Guardian tende a cortar a área útil ainda mais.
+  Isso é uma limitação do espaço físico do jogador, não algo que o jogo
+  consiga compensar via software — a recomendação de espaço mínimo acima
+  existe justamente para orientar o jogador a evitar esse cenário.
+- **Pé-direito**: qualquer teto residencial padrão (~2.4m ou mais) é
+  suficiente — o corpo do dispenser fica a 2.6m só na cena virtual, fora do
+  alcance do jogador de propósito (só a alavanca ao nível do chão é
+  interativa).
+
+Fora de escopo (avaliado e descartado, ver `game-3d/instrucao.md` seção 14):
+um modo "sentado" oficial, que exigiria redesenhar a altura de toda estação
+como relativa ao jogador em vez de fixa na sala; e leitura/adaptação
+automática ao tamanho do Guardian configurado no Quest (o jogo só lê a
+altura da cabeça do jogador, não o boundary).
+
 ## Sistema de áudio e feedback
 
 - **Música de tensão**: nos últimos ~15s da partida (ver "Ideia central").
@@ -447,10 +493,15 @@ pela posição do controller, sem colisão de verdade.
   localizar a direção da bomba crítica pelo próprio áudio espacializado,
   mesmo estando em outra estação. Também pulsa o controller que estiver
   segurando essa bomba, se houver.
-- **Haptics**: pulsos curtos de vibração em pegar objeto, confirmar um
-  puxão, e no alarme de proximidade acima. Ainda não cobre todos os
-  pontos de feedback tátil originalmente cotados (corte de fio, toque em
-  botões físicos) — ver `game-3d/instrucao.md` para o estado exato.
+- **Som de entrega**: a esteira sinaliza o resultado de cada bomba **na
+  hora**, mesmo o placar numérico só aparecendo no relatório final (ver
+  "Pontuação") — entrega correta toca um chime + flash verde na saída;
+  incorreta toca um som de explosão distante + tremida de câmera.
+- **Haptics**: cobre pegar objeto, confirmar um puxão, o alarme de
+  proximidade acima, corte de fio, toque em botão/teclado numérico, e
+  cada parafuso removido na etapa traseira (acerto e erro do
+  fio/botão/senha pulsam com a MESMA intensidade — o objetivo é confirmar
+  "a ação registrou", não vazar se foi a escolha certa).
 
 ## Roteiro de fases do MVP
 

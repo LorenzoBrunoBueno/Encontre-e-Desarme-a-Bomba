@@ -63,9 +63,24 @@ export function createTrashBin({ scene, position, rotationY = 0, grabSystem }) {
     return p;
   }
 
-  function discardCore(coreObject) {
+  // Descarte de verdade — antes só fazia `scene.remove()`, sem nunca
+  // liberar geometria/material (achado do teste completo de fluxos,
+  // 2026-09-22, ver game-3d/instrucao.md seção 15): o caminho "certo"
+  // (jogador desparafusa e joga o núcleo fora) vazava um par de
+  // geometria/material por bomba, pra sempre, sem nunca ser coletado —
+  // pior no loop contínuo entre fases (mesmo contexto WebGL vivo por várias
+  // rodadas). `.dispose()` é seguro de chamar mais de uma vez no mesmo
+  // objeto (idempotente), então não precisa de guarda extra aqui.
+  function disposeCore(coreObject) {
     grabSystem.unregister(coreObject);
     scene.remove(coreObject);
+    coreObject.geometry?.dispose();
+    const materials = Array.isArray(coreObject.material) ? coreObject.material : [coreObject.material];
+    materials.forEach((material) => material?.dispose());
+  }
+
+  function discardCore(coreObject) {
+    disposeCore(coreObject);
     const index = watchedCores.indexOf(coreObject);
     if (index !== -1) watchedCores.splice(index, 1);
   }
@@ -91,11 +106,20 @@ export function createTrashBin({ scene, position, rotationY = 0, grabSystem }) {
   }
 
   // Reinicia pra uma nova rodada em memória (game.js#resetRound, loop
-  // contínuo entre fases) — núcleos da rodada anterior já foram
-  // descartados/dispostos por resetRound diretamente, então só precisa
-  // esvaziar a lista de observação.
+  // contínuo entre fases). Dono ÚNICO do ciclo de vida de todo núcleo desde
+  // que é exposto (`watchCore`, chamado por defuseTable.js#onCoreExposed) —
+  // game.js#disposeBomb NÃO mexe mais no núcleo da bomba (achado do teste
+  // completo de fluxos, 2026-09-22: duas donos conflitantes do mesmo objeto
+  // faziam o núcleo sumir da mão do jogador se a bomba dele explodisse por
+  // fusível zerado enquanto ainda estava sendo carregado). Por isso, todo
+  // núcleo que nunca foi descartado de verdade (jogador não jogou na
+  // lixeira, bomba explodiu, ou o timer da rodada zerou primeiro) ainda
+  // está em `watchedCores` neste ponto — precisa dispor cada um antes de
+  // esvaziar a lista, não só limpar a referência.
   function reset() {
-    watchedCores.length = 0;
+    while (watchedCores.length) {
+      disposeCore(watchedCores.pop());
+    }
   }
 
   return { group, update, watchCore, reset };

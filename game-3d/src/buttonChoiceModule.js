@@ -16,6 +16,10 @@ const DEFAULT_TOUCH_THRESHOLD = 0.05;
 const FLASH_DURATION = 0.2;
 const PRESS_DEPTH = 0.012;
 const OUTLINE_SCALE = 1.4;
+// Mesmo raciocínio/valor de WIRE_EMISSIVE_INTENSITY em wireCuttingModule.js:
+// piso de legibilidade das 4 cores independente da luz de cena, já que a
+// sala é propositalmente escura fora do spot da mesa (ver game.js).
+const BUTTON_EMISSIVE_INTENSITY = 0.2;
 
 // Módulo de botão: sempre 4 cores fixas, 1 sorteada como correta por bomba.
 // Mesmo padrão do alicate/fio: aproximar só DESTACA (contorno branco) o
@@ -64,7 +68,13 @@ export function createButtonChoiceModule({ onResult, touchThreshold = DEFAULT_TO
     // lê melhor como botão físico de painel.
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(BUTTON_SIZE / 2, BUTTON_SIZE / 2, BUTTON_DEPTH, 16),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 })
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.5,
+        metalness: 0.1,
+        emissive: color,
+        emissiveIntensity: BUTTON_EMISSIVE_INTENSITY,
+      })
     );
     mesh.rotation.x = Math.PI / 2;
     mesh.position.set(x, y, 0);
@@ -126,7 +136,10 @@ export function createButtonChoiceModule({ onResult, touchThreshold = DEFAULT_TO
     // qual foi). Troca a cor base (`color`), não `emissive` — emissive
     // SOMA luz por cima da cor original em vez de substituir, então um
     // botão azul piscando "vermelho" via emissive vira roxo, não vermelho.
-    buttons.forEach((b) => b.mesh.material.color.set(button.color));
+    buttons.forEach((b) => {
+      b.mesh.material.color.set(button.color);
+      b.mesh.material.emissive.set(button.color);
+    });
     // Mesma intensidade pro botão certo e o errado — mesma regra do fio,
     // não vaza o resultado.
     pulseHaptic(controller, 0.3, 35);
@@ -138,7 +151,10 @@ export function createButtonChoiceModule({ onResult, touchThreshold = DEFAULT_TO
     if (flashTimer > 0) {
       flashTimer -= dt;
       if (flashTimer <= 0) {
-        buttons.forEach((b) => b.mesh.material.color.set(b.color));
+        buttons.forEach((b) => {
+          b.mesh.material.color.set(b.color);
+          b.mesh.material.emissive.set(b.color);
+        });
         if (flashButton) {
           flashButton.mesh.position.z = flashButton.restZ;
           flashButton = null;

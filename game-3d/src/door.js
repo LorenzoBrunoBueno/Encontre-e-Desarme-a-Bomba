@@ -9,11 +9,20 @@ import { createTextPanel } from './textPanel.js';
 // painel (`panel`) e a luz de status (`statusLight`) são expostos à parte
 // pra uma etapa futura poder animar abertura/fechamento e mudar a cor do
 // status sem precisar remontar a porta inteira.
-const DOOR_WIDTH = 0.9;
-const DOOR_HEIGHT = 2.0;
+export const DOOR_WIDTH = 0.9;
+export const DOOR_HEIGHT = 2.0;
 const JAMB_THICKNESS = 0.09;
 const JAMB_DEPTH = 0.07;
-const FRAME_HEIGHT = DOOR_HEIGHT + JAMB_THICKNESS;
+export const FRAME_HEIGHT = DOOR_HEIGHT + JAMB_THICKNESS;
+
+// Velocidade do slide de abertura/fechamento (m/s) — porta blindada pesada,
+// não deveria abrir instantaneamente nem demorar tanto que atrapalhe o
+// fluxo de morte/reanimação (game.js#triggerPlayerDeath).
+const SLIDE_SPEED = 1.6;
+const CLOSED_Y = DOOR_HEIGHT / 2;
+// Desce até bem abaixo do chão — o slab some atrás do plano do piso (que
+// renderiza por cima, ver game.js#floor) sem precisar recortar geometria.
+const OPEN_Y = -DOOR_HEIGHT * 1.2;
 
 export function createDoor({ scene, position, rotationY = 0 }) {
   const group = new THREE.Group();
@@ -47,11 +56,18 @@ export function createDoor({ scene, position, rotationY = 0 }) {
 
   // Nervuras horizontais (reforço estilo porta blindada) — só 3 tiras finas
   // levemente salientes sobre a slab, sem geometria extra de peso real.
+  // Filhas de `panel` (não de `group`): achado do teste de morte/reanimação
+  // (2026-09-22, ver game-3d/instrucao.md) — quando `panel` desliza pra
+  // abrir (openDoor(), ver update()/CLOSED_Y/OPEN_Y abaixo), qualquer coisa
+  // que ainda estivesse presa em `group` (a moldura estática) ficava pra
+  // trás flutuando exatamente na altura da porta fechada, lendo como uma
+  // faixa escura sólida atravessando o vão. Posições ajustadas pro espaço
+  // LOCAL de `panel` (que already está centrado em y=DOOR_HEIGHT/2, z=0.02).
   const ribGeometry = new THREE.BoxGeometry(DOOR_WIDTH - 0.08, 0.05, 0.015);
   [0.28, 0.52, 0.76].forEach((t) => {
     const rib = new THREE.Mesh(ribGeometry, frameMaterial);
-    rib.position.set(0, DOOR_HEIGHT * t, 0.05);
-    group.add(rib);
+    rib.position.set(0, DOOR_HEIGHT * (t - 0.5), 0.03);
+    panel.add(rib);
   });
 
   // Faixa de risco (amarelo/preto) perto da base — mesma técnica procedural
@@ -62,8 +78,8 @@ export function createDoor({ scene, position, rotationY = 0 }) {
     new THREE.PlaneGeometry(DOOR_WIDTH - 0.06, 0.16),
     new THREE.MeshStandardMaterial({ map: hazardTexture, roughness: 0.7 })
   );
-  hazardStripe.position.set(0, 0.22, 0.048);
-  group.add(hazardStripe);
+  hazardStripe.position.set(0, 0.22 - DOOR_HEIGHT / 2, 0.028);
+  panel.add(hazardStripe);
 
   // Barra de abertura (estilo painic bar), só decorativa por enquanto.
   const handle = new THREE.Mesh(
@@ -71,8 +87,8 @@ export function createDoor({ scene, position, rotationY = 0 }) {
     frameMaterial
   );
   handle.rotation.z = Math.PI / 2;
-  handle.position.set(DOOR_WIDTH / 2 - 0.14, DOOR_HEIGHT * 0.5, 0.05);
-  group.add(handle);
+  handle.position.set(DOOR_WIDTH / 2 - 0.14, 0, 0.03);
+  panel.add(handle);
 
   // Placa de aviso acima da porta, mesma linguagem dos painéis de status já
   // usados na sala (wallPanelA/B em game.js).
@@ -95,5 +111,50 @@ export function createDoor({ scene, position, rotationY = 0 }) {
   statusPointLight.position.copy(statusLight.position);
   group.add(statusPointLight);
 
-  return { group, panel, statusLight };
+  // Slide vertical (porta blindada) — reanimationRoom.js abre a porta ao
+  // reanimar o jogador e fecha sozinha quando ele sai da salinha (ver
+  // game.js#triggerPlayerDeath e a checagem de containsPoint em
+  // respawnRoom.js). Sem interação manual do jogador de propósito.
+  let targetY = CLOSED_Y;
+  let open = false;
+
+  function setStatusColor(color) {
+    statusLight.material.color.set(color);
+    statusLight.material.emissive.set(color);
+    statusPointLight.color.set(color);
+  }
+
+  function openDoor() {
+    open = true;
+    targetY = OPEN_Y;
+    setStatusColor(0xffaa00);
+  }
+
+  function closeDoor() {
+    open = false;
+    targetY = CLOSED_Y;
+    setStatusColor(0x33ff66);
+  }
+
+  function update(dt) {
+    if (panel.position.y === targetY) return;
+    const step = SLIDE_SPEED * dt;
+    if (Math.abs(panel.position.y - targetY) <= step) {
+      panel.position.y = targetY;
+    } else {
+      panel.position.y += Math.sign(targetY - panel.position.y) * step;
+    }
+  }
+
+  return {
+    group,
+    panel,
+    statusLight,
+    openDoor,
+    closeDoor,
+    update,
+    get isOpen() {
+      return open;
+    },
+  };
 }

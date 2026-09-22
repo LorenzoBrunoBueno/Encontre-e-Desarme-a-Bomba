@@ -1,5 +1,4 @@
-import * as THREE from 'three';
-import { createTextPanel } from './textPanel.js';
+import { createTextPanel, billboardYaw } from './textPanel.js';
 import { colorName } from './colorNames.js';
 import { CEILING_HEIGHT } from './roomLayout.js';
 
@@ -18,8 +17,6 @@ export function createHologramDisplay({ scene, camera }) {
   panel.setText(['HOLOGRAMA', 'AGUARDANDO ESCANEAMENTO'], '#33ffee', '#0a0a1acc');
   scene.add(panel.mesh);
 
-  const cameraPosition = new THREE.Vector3();
-
   function showBomb(bomb) {
     panel.setText(
       [
@@ -34,14 +31,13 @@ export function createHologramDisplay({ scene, camera }) {
   }
 
   function update() {
-    camera.getWorldPosition(cameraPosition);
-    // Billboard só no yaw: mantém a altura do holograma na mira, senão olhar
-    // pra cima/baixo inclinaria o painel de um jeito estranho.
-    cameraPosition.y = panel.mesh.position.y;
-    // lookAt() já deixa a face +Z (onde a textura é desenhada) voltada pra
-    // câmera — testado ao vivo via IWER; um rotateY(π) extra aqui vira a
-    // placa de costas pro jogador (confirmado empiricamente, não só teoria).
-    panel.mesh.lookAt(cameraPosition);
+    // billboardYaw (textPanel.js) trava a altura na do próprio painel antes
+    // do lookAt, senão olhar pra cima/baixo inclinaria o painel de um jeito
+    // estranho. lookAt() já deixa a face +Z (onde a textura é desenhada)
+    // voltada pra câmera — testado ao vivo via IWER; um rotateY(π) extra
+    // viraria a placa de costas pro jogador (confirmado empiricamente, não
+    // só teoria).
+    billboardYaw(panel.mesh, camera);
   }
 
   return { mesh: panel.mesh, showBomb, update };

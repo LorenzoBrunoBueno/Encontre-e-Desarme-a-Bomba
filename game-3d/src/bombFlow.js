@@ -65,9 +65,21 @@ export function createBombFlow({
     }
   }
 
+  // Achado do teste completo de fluxos (2026-09-22, ver
+  // game-3d/instrucao.md seção 15): se uma bomba B já estava armada
+  // (piscando, esperando o puxão ou o fallback automático) no exato
+  // momento em que outra bomba A é entregue na esteira — plausível, já que
+  // o jogo é multi-bomba por design (maxPending) — `markReady()` já
+  // no-opava (guarda `if (ready) return`), mas o `spawnTimer` era resetado
+  // do mesmo jeito. Isso não perdia nem duplicava bomba nenhuma (B
+  // continuava caindo normal pela alavanca/grace dela), só adiava sem
+  // motivo o PRÓXIMO armamento natural (a bomba C) por até um intervalo
+  // inteiro — o "prêmio" de entregar A (rearmar na hora) se perdia
+  // silenciosamente sempre que já havia uma bomba armada esperando.
   function notifyDelivered() {
+    const wasReady = ready;
     markReady();
-    spawnTimer = spawnIntervalSeconds;
+    if (!wasReady) spawnTimer = spawnIntervalSeconds;
   }
 
   function start() {

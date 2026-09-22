@@ -27,6 +27,13 @@ const CUT_GAP = 0.015;
 const ARC_HEIGHT = 0.06;
 const CURVE_SAMPLES = 12;
 const OUTLINE_SCALE = 1.6;
+// Piso de legibilidade das 4 cores independente da luz de cena (achado de
+// playtest manual: a sala é propositalmente escura fora do spot da mesa —
+// ver game.js — então sem isso a cor real de um fio pode ficar ambígua na
+// sombra do próprio braço/controller do jogador). Baixo o bastante pra não
+// parecer um fio "brilhando" (self-illuminated), só garante que a cor
+// certa sempre seja identificável.
+const WIRE_EMISSIVE_INTENSITY = 0.2;
 
 function closestPointOnSegment(point, start, end) {
   const segment = new THREE.Vector3().subVectors(end, start);
@@ -45,15 +52,25 @@ function makeStraightSegment(start, end, color) {
   const direction = new THREE.Vector3().subVectors(end, start);
   const length = direction.length();
   const geometry = new THREE.CylinderGeometry(WIRE_RADIUS, WIRE_RADIUS, length, 8);
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.6,
+    emissive: color,
+    emissiveIntensity: WIRE_EMISSIVE_INTENSITY,
+  });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.copy(start).addScaledVector(direction, 0.5);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
   return mesh;
 }
 
-// Módulo de corte de fio: interação por gatilho (handleTrigger), estilo KTANE —
-// cortar o fio errado explode a bomba na hora (onFailed), sem esperar o timer.
+// Módulo de corte de fio: interação por gatilho (handleTrigger). Cortar o fio
+// errado chama `onFailed()`, que só marca `wireResult = false` (bomb.js) — o
+// resultado conta apenas no relatório final (CLAUDE.md, "Pontuação"), sem
+// nenhuma consequência imediata. Comentário anterior aqui dizia que cortar
+// errado "explode a bomba na hora, estilo KTANE" — nunca existiu esse
+// caminho no código (achado do teste completo de fluxos, 2026-09-22, ver
+// game-3d/instrucao.md seção 15); corrigido pra não confundir quem ler.
 export function createWireCuttingModule({ onSolved, onFailed, sfx }) {
   const group = new THREE.Group();
   let resolved = false;
@@ -80,7 +97,12 @@ export function createWireCuttingModule({ onSolved, onFailed, sfx }) {
     const curve = new THREE.QuadraticBezierCurve3(localStart, mid, localEnd);
     const mesh = new THREE.Mesh(
       new THREE.TubeGeometry(curve, 12, WIRE_RADIUS, 8, false),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.6,
+        emissive: color,
+        emissiveIntensity: WIRE_EMISSIVE_INTENSITY,
+      })
     );
     group.add(mesh);
 
