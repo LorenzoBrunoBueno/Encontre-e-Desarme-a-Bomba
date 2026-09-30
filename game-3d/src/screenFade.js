@@ -40,6 +40,18 @@ export function createScreenFade({ camera }) {
   gameOverText.mesh.visible = false;
   camera.add(gameOverText.mesh);
 
+  // Mensagem da 1ª morte (revivível, ver game.js#triggerPlayerDeath) —
+  // painel separado do de game over porque os dois nunca aparecem ao mesmo
+  // tempo, mas esse aqui precisa ser reescrito TODO FRAME (contador
+  // regressivo), enquanto o de game over é escrito uma vez só.
+  const deathText = createTextPanel({ width: 0.8, height: 0.3, fontSize: 36 });
+  deathText.mesh.position.set(0, 0, -0.7);
+  deathText.mesh.renderOrder = TEXT_RENDER_ORDER;
+  deathText.mesh.material.depthTest = false;
+  deathText.mesh.material.depthWrite = false;
+  deathText.mesh.visible = false;
+  camera.add(deathText.mesh);
+
   let alpha = 0;
   let fadeFrom = 0;
   let fadeTo = 0;
@@ -74,6 +86,21 @@ export function createScreenFade({ camera }) {
     gameOverText.mesh.visible = false;
   }
 
+  // Chamado todo frame durante o blackout da 1ª morte (game.js
+  // #updateDeathSequence) com o tempo restante — o título fixo "VOCÊ
+  // MORREU" deixa o motivo da tela preta óbvio (antes era só preto, sem
+  // nenhuma mensagem), e o número regressivo comunica quando o respawn
+  // acontece, já que não há mais nenhum outro indício visual disso.
+  function showDeathCountdown(secondsRemaining) {
+    const seconds = Math.max(0, Math.ceil(secondsRemaining));
+    deathText.setText(['VOCÊ MORREU', String(seconds)], '#ff5555', '#000000');
+    deathText.mesh.visible = true;
+  }
+
+  function hideDeathCountdown() {
+    deathText.mesh.visible = false;
+  }
+
   function update(dt) {
     if (fadeDuration > 0 && fadeElapsed < fadeDuration) {
       fadeElapsed = Math.min(fadeElapsed + dt, fadeDuration);
@@ -87,6 +114,8 @@ export function createScreenFade({ camera }) {
     fadeTo: fadeTo_,
     showGameOverText,
     hideGameOverText,
+    showDeathCountdown,
+    hideDeathCountdown,
     update,
     get alpha() {
       return alpha;

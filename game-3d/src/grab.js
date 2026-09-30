@@ -112,9 +112,16 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
 
   function register(
     object3D,
-    { grabRotation = null, throwable = false, homeAnchor = null, homePosition = null, homeQuaternion = null } = {}
+    {
+      grabRotation = null,
+      throwable = false,
+      homeAnchor = null,
+      homePosition = null,
+      homeQuaternion = null,
+      grabRadius = GRAB_RADIUS,
+    } = {}
   ) {
-    grabbables.push({ object3D, grabRotation, throwable, homeAnchor, homePosition, homeQuaternion });
+    grabbables.push({ object3D, grabRotation, throwable, homeAnchor, homePosition, homeQuaternion, grabRadius });
   }
 
   function unregister(object3D) {
@@ -161,13 +168,13 @@ export function createGrabSystem({ scene, controllers, isLocked = () => false })
     controller.getWorldPosition(tip);
 
     let nearest = null;
-    let nearestDistance = GRAB_RADIUS;
+    let nearestDistance = Infinity;
     grabbables.forEach((entry) => {
       if (isHeld(entry.object3D)) return;
       const objectPosition = new THREE.Vector3();
       entry.object3D.getWorldPosition(objectPosition);
       const distance = objectPosition.distanceTo(tip);
-      if (distance <= nearestDistance) {
+      if (distance <= entry.grabRadius && distance <= nearestDistance) {
         nearest = entry;
         nearestDistance = distance;
       }

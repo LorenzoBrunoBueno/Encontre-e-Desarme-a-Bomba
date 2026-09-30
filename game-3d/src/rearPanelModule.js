@@ -264,5 +264,10 @@ export function createRearPanelModule() {
     get coreObject() {
       return core;
     },
+    // Referências de posição (mesh de cada parafuso, espaço local de
+    // `group`) — mesmo padrão de exposição de keypadModule.js#buttons,
+    // usado por testes automatizados (harness IWER) pra mirar um parafuso
+    // específico via localToWorld.
+    screws,
   };
 }

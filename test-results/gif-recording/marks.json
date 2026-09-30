@@ -1,0 +1,26 @@
+[
+  {
+    "label": "dispenser:start",
+    "virtualMs": 1533.3333333333612
+  },
+  {
+    "label": "scanner:start",
+    "virtualMs": 6166.66666666657
+  },
+  {
+    "label": "table_front:start",
+    "virtualMs": 14216.666666666679
+  },
+  {
+    "label": "table_rear:start",
+    "virtualMs": 31716.666666666904
+  },
+  {
+    "label": "conveyor:start",
+    "virtualMs": 57983.33333332975
+  },
+  {
+    "label": "conveyor:end",
+    "virtualMs": 67699.9999999985
+  }
+]

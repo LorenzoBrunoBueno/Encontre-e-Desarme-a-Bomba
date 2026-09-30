@@ -251,5 +251,10 @@ export function createWireCuttingModule({ onSolved, onFailed, sfx }) {
     // Cor do fio certo — usada pelo panfleto (scanner) para instruir o
     // jogador, independente de a bomba já ter sido cortada ou não.
     correctColor: colors[correctIndex],
+    // Referências de posição (espaço local de `group`, amostras da curva de
+    // cada fio) — mesmo padrão de exposição de keypadModule.js#buttons,
+    // usado por testes automatizados (harness IWER) pra mirar um fio
+    // específico via localToWorld, sem precisar reimplementar a curva.
+    wires,
   };
 }

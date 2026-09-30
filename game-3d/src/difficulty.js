@@ -19,8 +19,11 @@
 const PHASES = [
   null, // índice 0 não usado — fases são 1-based, como currentPhase da API
   {
-    spawnIntervalSeconds: 12,
-    leverGraceSeconds: 6,
+    // spawnIntervalSeconds/leverGraceSeconds aumentados (playtest real no
+    // Quest 3, 2026-09-30): o valor antigo (12s) fazia bombas se acumularem
+    // e explodirem em sequência mesmo desarmando num ritmo razoável.
+    spawnIntervalSeconds: 18,
+    leverGraceSeconds: 8,
     maxPending: 5,
     scanOverheatInterval: 3,
     bombFuseSeconds: 90,
@@ -31,8 +34,8 @@ const PHASES = [
     scoreToAdvance: 200,
   },
   {
-    spawnIntervalSeconds: 10,
-    leverGraceSeconds: 5,
+    spawnIntervalSeconds: 15,
+    leverGraceSeconds: 7,
     maxPending: 5,
     scanOverheatInterval: 3,
     bombFuseSeconds: 90,
@@ -43,10 +46,11 @@ const PHASES = [
     scoreToAdvance: 500,
   },
   {
-    // Teto de dificuldade — restaura os valores que o repo tinha como
-    // únicos antes deste arquivo existir.
-    spawnIntervalSeconds: 9,
-    leverGraceSeconds: 4,
+    // Teto de dificuldade — ainda o ritmo mais apertado do jogo, só que
+    // também revisado pra cima junto com as fases 1-2 acima (ver comentário
+    // na fase 1).
+    spawnIntervalSeconds: 13,
+    leverGraceSeconds: 6,
     maxPending: 5,
     scanOverheatInterval: 3,
     bombFuseSeconds: 90,

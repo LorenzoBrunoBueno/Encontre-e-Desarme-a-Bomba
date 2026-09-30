@@ -438,6 +438,14 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   // grab.js `homeAnchor`/`homePosition`), então as duas pontas usam o mesmo
   // valor de propósito.
   const TOOL_HOME_POSITION = new THREE.Vector3(0, -0.05, 0);
+  // Raio de grab bem menor que o padrão (grab.js GRAB_RADIUS = 0.35m) só pras
+  // ferramentas do cinto — achado de playtest: o padrão pegava a ferramenta
+  // sem querer sempre que a mão só PASSAVA perto do corpo (ex.: descendo pra
+  // pegar uma bomba baixa na caixa de coleta), já que o cinto acompanha a
+  // altura da cabeça/cintura e fica bem no meio do caminho desse gesto. Esse
+  // raio precisa ser pequeno o bastante pra só disparar quando a mão está
+  // efetivamente ENCOSTANDO na ferramenta, não só "na região do cinto".
+  const BELT_TOOL_GRAB_RADIUS = 0.08;
 
   const pincers = createPincers();
   pincers.group.position.copy(TOOL_HOME_POSITION);
@@ -446,6 +454,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     grabRotation: toolGrabRotation,
     homeAnchor: utilityBelt.rightAnchor,
     homePosition: TOOL_HOME_POSITION,
+    grabRadius: BELT_TOOL_GRAB_RADIUS,
   });
 
   const screwdriver = createScrewdriver();
@@ -455,6 +464,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     grabRotation: toolGrabRotation,
     homeAnchor: utilityBelt.leftAnchor,
     homePosition: TOOL_HOME_POSITION,
+    grabRadius: BELT_TOOL_GRAB_RADIUS,
   });
 
   const proximityAlarm = createProximityAlarm({ listener: audioListener, grabSystem });
@@ -987,7 +997,10 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   // distância até a bomba (sala fechada). Máquina de estados simples, sem
   // setTimeout — atualizada em updateDeathSequence, chamada todo frame de
   // animate() (mesmo padrão de acumulador de dispenser.js/bombFlow.js).
-  const BLACKOUT_SECONDS = 2.5; // placeholder, ajustável por playtesting
+  // 3s — pedido explícito do usuário (feedback de playtest 2026-09-30) pra
+  // servir como "novo tempo de respawn" claro, junto com o texto/contador
+  // de screenFade.showDeathCountdown() abaixo.
+  const BLACKOUT_SECONDS = 3;
   const REVIVE_FADE_SECONDS = 1.5; // placeholder — câmera volta ao normal aos poucos
   const GAME_OVER_HOLD_SECONDS = 3; // placeholder — tempo com a mensagem de game over na tela
   // Mais forte que o tremor padrão de entrega incorreta (cameraShake.trigger()
@@ -1022,6 +1035,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     bombExplosionSfx.play();
     cameraShake.trigger(DEATH_SHAKE_INTENSITY, DEATH_SHAKE_DURATION);
     screenFade.snapOpaque();
+    screenFade.showDeathCountdown(BLACKOUT_SECONDS);
   }
 
   function triggerGameOver() {
@@ -1048,6 +1062,10 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     bombExplosionSfx.play();
     cameraShake.trigger(DEATH_SHAKE_INTENSITY, DEATH_SHAKE_DURATION);
     screenFade.snapOpaque();
+    // Substitui o contador da 1ª morte caso essa 2ª explosão tenha
+    // acontecido ainda durante o blackout dela (ver comentário do guard
+    // acima) — os dois textos nunca ficam visíveis ao mesmo tempo.
+    screenFade.hideDeathCountdown();
     screenFade.showGameOverText(['MAQUINA DE REANIMACAO DESTRUIDA', 'FIM DE JOGO']);
   }
 
@@ -1060,11 +1078,14 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     if (deathPhase === 'blackout') {
       deathTimer -= dt;
       if (deathTimer <= 0) {
+        screenFade.hideDeathCountdown();
         player.position.set(respawnRoom.machinePosition.x, player.position.y, respawnRoom.machinePosition.z);
         respawnRoom.openDoor();
         teleport.unlock();
         screenFade.fadeTo(0, REVIVE_FADE_SECONDS);
         deathPhase = 'none';
+      } else {
+        screenFade.showDeathCountdown(deathTimer);
       }
     } else if (deathPhase === 'gameOverHold') {
       deathTimer -= dt;
@@ -1095,6 +1116,7 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     deathTimer = 0;
     respawnRoom.closeDoor();
     screenFade.hideGameOverText();
+    screenFade.hideDeathCountdown();
     screenFade.fadeTo(0, 0);
     teleport.unlock();
   }
@@ -1285,6 +1307,13 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
     grabSystem.update(dt);
 
     renderer.render(scene, camera);
+
+    // Câmera espectadora (window.__test.createSpectatorView, ver bloco
+    // devInputOverride abaixo) — um segundo WebGLRenderer/canvas independente
+    // do headset, usado por scripts de gravação de demo pra capturar um
+    // plano fixo em vez do framebuffer estéreo da sessão XR. Só existe
+    // (window.__spectatorRender é setado) em modo de gravação.
+    if (devInputOverride && window.__spectatorRender) window.__spectatorRender();
   }
 
   function start() {
@@ -1306,6 +1335,91 @@ export function createGame({ phase = 1, devInputOverride = false } = {}) {
   function pause() {
     running = false;
     backgroundMusic.stop();
+  }
+
+  // Hook de leitura só-de-depuração para gravação de demos via automação
+  // IWER (mcp__iwer__*, ver CLAUDE.md) — expõe referências vivas da cena
+  // pra scripts externos calcularem posições mundiais (fio/botão/senha
+  // sorteiam quadrante por bomba, então não dá pra hardcodar coordenadas).
+  // Não influencia nenhuma lógica de jogo, só leitura. Atrás de
+  // `devInputOverride` (mesmo gate de main.js/game.js pro resto das
+  // conveniências de dev) — nunca deve vazar pra um build de produção.
+  if (devInputOverride) window.__iwerDebug = {
+    bombs,
+    dispenser,
+    scanner,
+    defuseTable,
+    conveyor,
+    trashBin,
+    pincers,
+    screwdriver,
+    utilityBelt,
+    teleport,
+    centerLever,
+    layout,
+    player,
+    camera,
+    controllers,
+    scene,
+    renderer,
+    THREE,
+    worldPos(object3D) {
+      const v = new THREE.Vector3();
+      object3D.getWorldPosition(v);
+      return { x: v.x, y: v.y, z: v.z };
+    },
+    localToWorld(object3D, local) {
+      const v = object3D.localToWorld(new THREE.Vector3(local.x, local.y, local.z));
+      return { x: v.x, y: v.y, z: v.z };
+    },
+  };
+
+  // window.__test — API de automação "oficial" (ao contrário de
+  // __iwerDebug acima, que expõe referências internas cruas), pensada pra
+  // scripts de gravação teleportarem exatamente como um jogador real: só
+  // pelos marcadores nomeados do teleport.js (roomLayout.js#teleportPoints),
+  // nunca escrevendo player.position direto. Mesmo gate de devInputOverride
+  // — nunca existe fora de modo de gravação/dev.
+  if (devInputOverride) {
+    let spectatorRenderer = null;
+    let spectatorCamera = null;
+
+    window.__test = {
+      getMarkers() {
+        return teleport.getMarkers();
+      },
+      // Mesma validação (raycast real do controller contra os discos de
+      // teleporte) que teleport.js usa pra decidir se um selectstart
+      // teleporta de verdade — devolve o id do marcador mirado, ou null.
+      isRayValid(handedness) {
+        return teleport.isRayValid(handedness);
+      },
+      getPlayerPos() {
+        return { x: player.position.x, y: player.position.y, z: player.position.z };
+      },
+      // Segundo WebGLRenderer/canvas, independente do que o headset vê —
+      // renderiza a MESMA scene de um ponto de vista de "câmera de
+      // making-of", pra gravação de demo não depender do framebuffer
+      // estéreo da sessão XR (que a maioria dos browsers não espelha pro
+      // <canvas> 2D durante apresentação imersiva).
+      createSpectatorView({ width = 1280, height = 720 } = {}) {
+        spectatorRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        spectatorRenderer.setSize(width, height);
+        spectatorRenderer.setPixelRatio(1);
+        spectatorRenderer.domElement.id = 'spectator-canvas';
+        document.body.appendChild(spectatorRenderer.domElement);
+        spectatorCamera = new THREE.PerspectiveCamera(50, width / height, 0.05, 100);
+        window.__spectatorRender = () => spectatorRenderer.render(scene, spectatorCamera);
+        return spectatorRenderer.domElement.id;
+      },
+      setSpectatorPose(position, target) {
+        spectatorCamera.position.set(position.x, position.y, position.z);
+        spectatorCamera.lookAt(target.x, target.y, target.z);
+      },
+      captureSpectatorFrame(mimeType = 'image/jpeg', quality = 0.85) {
+        return spectatorRenderer.domElement.toDataURL(mimeType, quality);
+      },
+    };
   }
 
   return { start, pause, on };

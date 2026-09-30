@@ -19,7 +19,7 @@ const RAY_COLOR_HOVER = 0x44ff88;
 // desarme a locomoção fica completamente travada (estado à parte do
 // teleporte livre usado no resto da sala).
 export function createTeleportSystem({ scene, player, controllers, points }) {
-  const pads = points.map(({ x, z }) => {
+  const pads = points.map(({ id, x, z }) => {
     const mesh = new THREE.Mesh(
       new THREE.RingGeometry(PAD_RADIUS * 0.7, PAD_RADIUS, 32),
       new THREE.MeshBasicMaterial({
@@ -32,7 +32,7 @@ export function createTeleportSystem({ scene, player, controllers, points }) {
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(x, 0.01, z);
     scene.add(mesh);
-    return { mesh, x, z };
+    return { id, mesh, x, z };
   });
 
   const raycaster = new THREE.Raycaster();
@@ -105,10 +105,35 @@ export function createTeleportSystem({ scene, player, controllers, points }) {
     setPadsVisible(true);
   }
 
+  // Só-leitura, para window.__test (ver game.js) — permite que um script de
+  // automação teleporte exatamente do jeito que um jogador real faria: mirar
+  // um marcador NOMEADO e confirmar com o gatilho, em vez de escrever
+  // player.position direto. `getMarkers()` nunca inclui geometria da sala
+  // (só os waypoints já validados no roomLayout.js), então qualquer
+  // `teleportTo(id)` do script fica automaticamente restrito à área jogável.
+  function getMarkers() {
+    return pads.map((pad) => ({ id: pad.id, x: pad.x, z: pad.z, radius: PAD_RADIUS }));
+  }
+
+  // Mesma validação que o próprio teleporte usa pra decidir se um
+  // selectstart teleporta (state.hoveredPad, calculado em update() acima a
+  // partir do raycast real do controller) — devolve o id do pad mirado, ou
+  // null se o raio não estiver sobre nenhum. Um script de automação usa o
+  // valor de retorno tanto como booleano ("ficou válido?") quanto para
+  // confirmar que é o marcador certo antes de clicar.
+  function isRayValid(handedness) {
+    const state = controllerStates.find(
+      (s) => s.controller.userData?.inputSource?.handedness === handedness
+    );
+    return state?.hoveredPad?.id ?? null;
+  }
+
   return {
     update,
     lock,
     unlock,
+    getMarkers,
+    isRayValid,
     get isLocked() {
       return locked;
     },

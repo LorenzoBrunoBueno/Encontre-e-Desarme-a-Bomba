@@ -100,11 +100,15 @@ export function createRoomLayout() {
   // Um único ponto de teleporte cobre dispenser+scanner (mesma parede,
   // lado a lado) — o resto continua 1 ponto por estação (a alavanca de
   // purga inclusa, desde que ela ganhou uma posição de parede de verdade).
+  //
+  // `id` nomeia cada waypoint (usado por window.__test.getMarkers(), ver
+  // game.js) — scripts de automação (game-3d/scripts/record-demo.mjs)
+  // teleportam só por esses nomes, nunca por coordenada calculada à mão.
   const teleportPoints = [
-    { x: 0, z: stations.dispenser.position.z + 0.75 }, // preparo: dispenser + scanner
-    { x: stations.defuseTable.position.x - 1.0, z: 0 }, // mesa de desarme
-    { x: stations.conveyor.position.x + 1.0, z: 0 }, // esteira
-    { x: stations.purgeLever.position.x + 1.0, z: stations.purgeLever.position.z }, // alavanca de purga
+    { id: 'dispenser_scanner', x: 0, z: stations.dispenser.position.z + 0.75 }, // preparo: dispenser + scanner
+    { id: 'defuse_table', x: stations.defuseTable.position.x - 1.0, z: 0 }, // mesa de desarme
+    { id: 'conveyor', x: stations.conveyor.position.x + 1.0, z: 0 }, // esteira
+    { id: 'purge_lever', x: stations.purgeLever.position.x + 1.0, z: stations.purgeLever.position.z }, // alavanca de purga
   ];
 
   return { stations, teleportPoints, roomHalfX: ROOM_HALF_X, roomHalfZ: ROOM_HALF_Z, wallRotations: WALL_ROTATIONS };

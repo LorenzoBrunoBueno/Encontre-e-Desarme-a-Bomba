@@ -187,5 +187,9 @@ export function createButtonChoiceModule({ onResult, touchThreshold = DEFAULT_TO
     dispose,
     // Cor do botão certo — usada pelo panfleto (scanner).
     correctColor: colors[correctIndex],
+    // Referências de posição (espaço local de `group`) — mesmo padrão de
+    // exposição de keypadModule.js#buttons, usado por testes automatizados
+    // (harness IWER) pra calcular coordenadas mundiais via localToWorld.
+    buttons,
   };
 }
